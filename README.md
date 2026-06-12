@@ -40,7 +40,7 @@ port that every other machine (TVs, the logging PC, your laptop) can reach in a 
 ```powershell
 # Clone to a plain local path (a OneDrive/Dropbox-synced folder is fine for the CODE,
 # but the DATABASE must not live in one -- see step 2).
-git clone <your-repo-url> C:\BayTracking
+git clone https://github.com/Xavier8264/bay-tracker.git C:\BayTracking
 cd C:\BayTracking
 ```
 
