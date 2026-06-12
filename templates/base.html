@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>{% block title %}Bay Tracking{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <!-- Shown by common.js when the live connection drops (so a frozen TV is obvious). -->
+  <div id="offline-banner"></div>
+
+  {% block topbar %}
+  <div class="topbar">
+    <h1>Bay Tracking</h1>
+    <a href="{{ url_for('console') }}" class="{{ 'active' if active_page=='console' }}">Console</a>
+    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if active_page=='dashboard' }}">Dashboard</a>
+    <a href="{{ url_for('stats') }}" class="{{ 'active' if active_page=='stats' }}">Stats</a>
+    <a href="{{ url_for('admin') }}" class="{{ 'active' if active_page=='admin' }}">Admin</a>
+    <span class="spacer"></span>
+    <span id="conn-pill" class="status-pill">LIVE</span>
+  </div>
+  {% endblock %}
+
+  {% block content %}{% endblock %}
+
+  <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

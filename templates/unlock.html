@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Unlock {{ area }}{% endblock %}
+{% block content %}
+<div class="unlock-wrap">
+  <div class="card unlock-card">
+    <div class="lock">🔒</div>
+    <h2 style="text-transform:capitalize">{{ area }} is locked</h2>
+    <p class="hint">This page holds {{ 'cost and analysis data' if area=='stats' else 'system configuration' }}.
+       Enter the {{ area }} PIN to continue.</p>
+    <label for="pin">PIN</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off" autofocus>
+    <div class="error-text" id="err"></div>
+    <div style="margin-top:14px"><button class="primary" style="width:100%" id="go">Unlock</button></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const area = {{ area|tojson }};
+  async function unlock() {
+    const pin = document.getElementById("pin").value;
+    const r = await BT.post("/unlock", { area, pin });
+    if (r.ok) { location.reload(); }
+    else { document.getElementById("err").textContent = (r.data && r.data.error) || "Incorrect PIN."; }
+  }
+  document.getElementById("go").onclick = unlock;
+  document.getElementById("pin").addEventListener("keydown", e => { if (e.key === "Enter") unlock(); });
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Logging Console{% endblock %}
+{% set active_page = 'console' %}
+
+{% block content %}
+<div class="topbar" style="top:52px;background:var(--panel-2);">
+  <label style="margin:0;color:var(--text);font-weight:600;">Your initials</label>
+  <input id="my-initials" style="width:120px" maxlength="8" placeholder="e.g. JP"
+         autocomplete="off" title="Used to pre-fill every action. You can change it per action.">
+  <span class="hint">Set once; every action you log uses these (editable per action).</span>
+  <span class="spacer"></span>
+  <span class="hint">▶ running &nbsp; ⚠ delayed &nbsp; ○ idle &nbsp; ⏸ on break</span>
+</div>
+
+<div id="mode-banner"></div>
+
+<div class="grid-wrap">
+  <div id="grid" class="bay-grid"></div>
+
+  <!-- WIP / queue pool: units that left a bay and await the next step -->
+  <div class="card" id="wip-card" style="margin-top:16px;display:none">
+    <h2>WIP / Queue pool <span class="hint">(left a bay; click to start in another)</span></h2>
+    <div id="wip-list" class="row"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="backdrop"><div class="modal" id="modal"></div></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/console.js') }}"></script>
+{% endblock %}

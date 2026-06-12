@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Admin &amp; Settings{% endblock %}
+{% set active_page = 'admin' %}
+
+{% block content %}
+<div class="page">
+  {% if not pin_set %}
+  <div class="confirm-note">No Admin PIN is set — anyone on the network can change configuration.
+    Set an Admin PIN below.</div>
+  {% endif %}
+
+  <div class="confirm-note">⚠ <b>Confirm your real values.</b> Nothing here is pre-filled with example data.
+    Delay reasons, divisions, products, initials, and especially the
+    <b>shift / break / operating-hours times</b> all start empty — enter the values your plant actually uses.
+    Until operating hours are entered, the system counts <i>all</i> elapsed time (no break/off-hours pauses).</div>
+
+  <!-- Divisions -->
+  <div class="card"><h2>Divisions</h2>
+    <div class="toolbar"><div class="col"><input id="new-division" placeholder="Division name"></div>
+      <button class="primary" id="add-division">Add</button></div>
+    <table><tbody id="divisions"></tbody></table>
+  </div>
+
+  <!-- Delay reasons -->
+  <div class="card"><h2>Delay reasons</h2>
+    <p class="hint">Each reason carries its division and an in/out-of-control tag. “Other” is always present and pinned to the bottom.</p>
+    <div class="toolbar">
+      <div class="col"><label>Label</label><input id="nr-label" placeholder="e.g. Missing part"></div>
+      <div class="col"><label>Division</label><select id="nr-div"></select></div>
+      <div class="col"><label>Control</label><select id="nr-ctrl">
+        <option value="">—</option><option value="in">In control</option><option value="out">Out of control</option></select></div>
+      <button class="primary" id="add-reason">Add</button>
+    </div>
+    <table><thead><tr><th>Reason</th><th>Division</th><th>Control</th><th>Status</th><th></th></tr></thead>
+      <tbody id="reasons"></tbody></table>
+  </div>
+
+  <!-- Products -->
+  <div class="card"><h2>Product numbers</h2>
+    <p class="hint">The known short list. Oddballs typed at the console aren’t added here automatically.
+      “Target minutes” is stored for a future feature and is not shown anywhere yet.</p>
+    <div class="toolbar">
+      <div class="col"><label>Number</label><input id="np-number" placeholder="e.g. P-100"></div>
+      <div class="col"><label>Description</label><input id="np-desc"></div>
+      <div class="col"><label>Target min (optional)</label><input id="np-target" type="number" step="any"></div>
+      <button class="primary" id="add-product">Add</button>
+    </div>
+    <table><thead><tr><th>Number</th><th>Description</th><th>Target</th><th>Status</th><th></th></tr></thead>
+      <tbody id="products"></tbody></table>
+  </div>
+
+  <!-- Initials roster -->
+  <div class="card"><h2>Initials roster</h2>
+    <p class="hint">The console autocompletes from this but always allows new initials.</p>
+    <div class="toolbar">
+      <div class="col"><label>Initials</label><input id="ni-ini" maxlength="8" placeholder="JP"></div>
+      <div class="col"><label>Name (optional)</label><input id="ni-name"></div>
+      <button class="primary" id="add-initials">Add</button>
+    </div>
+    <table><thead><tr><th>Initials</th><th>Name</th><th>Status</th><th></th></tr></thead>
+      <tbody id="initials"></tbody></table>
+  </div>
+
+  <!-- Bays & layout -->
+  <div class="card"><h2>Bays &amp; layout</h2>
+    <div class="toolbar">
+      <div class="col"><label>Grid columns</label><input id="lay-cols" type="number" min="1" max="8"></div>
+      <div class="col"><label>Standard rows</label><input id="lay-rows" type="number" min="1" max="8"></div>
+      <div class="col"><label><input type="checkbox" id="lay-extras" style="width:auto"> Enable extra top-row bays</label></div>
+      <button class="primary" id="save-layout">Save layout</button>
+    </div>
+    <p class="hint">Default is 4×3 (bays 1–12). Enabling extras renders a 4×4 grid; place each extra bay in a top-row column.</p>
+    <div class="toolbar">
+      <div class="col"><label>Add extra bay name</label><input id="nb-name" placeholder="Bay 13"></div>
+      <div class="col"><label>Top-row column</label><input id="nb-col" type="number" min="1" max="8"></div>
+      <button class="primary" id="add-bay">Add extra bay</button>
+    </div>
+    <table><thead><tr><th>Bay</th><th>Type</th><th>Top column</th><th>Status</th><th></th></tr></thead>
+      <tbody id="bays"></tbody></table>
+  </div>
+
+  <!-- Schedule -->
+  <div class="card"><h2>Break schedule</h2>
+    <p class="hint">Same every operating day. At each window all timers pause and a distinct ON BREAK state shows.
+      <b>Confirm these — they start empty.</b> (Spec examples: lunch 11:30/30m; a 07:00/10m break.)</p>
+    <table><thead><tr><th>Start (HH:MM)</th><th>Minutes</th><th>Label</th><th></th></tr></thead>
+      <tbody id="breaks"></tbody></table>
+    <div class="actions"><button id="add-break">+ Add break</button><button class="primary" id="save-breaks">Save breaks</button></div>
+  </div>
+
+  <div class="card"><h2>Shifts (attribution cutoffs)</h2>
+    <p class="hint">Each run/delay is attributed to the shift its start time falls in. Clean cutoffs only.
+      <b>Confirm these.</b> (Spec examples: 06:00 / 14:00 / 22:00.)</p>
+    <table><thead><tr><th>Name</th><th>Starts (HH:MM)</th><th></th></tr></thead><tbody id="shifts"></tbody></table>
+    <div class="actions"><button id="add-shift">+ Add shift</button><button class="primary" id="save-shifts">Save shifts</button></div>
+  </div>
+
+  <div class="card"><h2>Operating calendar (off-hours = non-counting)</h2>
+    <label><input type="checkbox" id="oc-enabled" style="width:auto"> Limit counting to operating hours
+      <span class="hint">(off = count 24/7 — nothing freezes for off-hours)</span></label>
+    <div id="oc-days" style="margin-top:10px;display:none">
+      <p class="hint">Per day, list windows like <code>00:00-24:00</code> for 24h, or
+        <code>06:00-22:00</code>, comma-separated for multiple. Leave blank = closed.
+        Use <code>24:00</code> for end-of-day.</p>
+      <div id="oc-rows"></div>
+      <div class="actions"><button id="oc-fill" type="button">Fill 24h Mon–Sat (confirm before saving)</button></div>
+    </div>
+    <div class="actions"><button class="primary" id="save-oc">Save operating calendar</button></div>
+  </div>
+
+  <!-- Settings -->
+  <div class="card"><h2>Behaviour &amp; cost settings</h2>
+    <div class="grid2">
+      <div><label>Delay takeover duration (seconds)</label><input id="set-takeover" type="number" min="3" max="60"></div>
+      <div><label>Labor cost rate ($/hour) <span class="hint">(blank = no cost shown)</span></label><input id="set-rate" type="number" step="any"></div>
+      <div><label>Stale delay threshold (minutes)</label><input id="set-staled" type="number"></div>
+      <div><label>Stale run threshold (minutes)</label><input id="set-staler" type="number"></div>
+      <div style="grid-column:1/-1"><label>Backup network path <span class="hint">(documented for the scheduled DB backup)</span></label>
+        <input id="set-backup" placeholder="\\\\server\\share\\baytracker"></div>
+    </div>
+    <div class="actions"><button class="primary" id="save-settings">Save settings</button></div>
+  </div>
+
+  <!-- PINs -->
+  <div class="card"><h2>PINs</h2>
+    <p class="hint">Protect Stats (cost/analysis) and Admin (configuration). Leave blank and save to clear a PIN.</p>
+    <div class="grid2">
+      <div><label>Stats PIN <span id="pin-stats-state" class="badge"></span></label><input id="pin-stats" type="password" autocomplete="off" placeholder="leave blank to keep">
+        <label style="margin-top:6px"><input type="checkbox" id="pin-stats-clear" style="width:auto"> Clear the Stats PIN (make page open)</label></div>
+      <div><label>Admin PIN <span id="pin-admin-state" class="badge"></span></label><input id="pin-admin" type="password" autocomplete="off" placeholder="leave blank to keep">
+        <label style="margin-top:6px"><input type="checkbox" id="pin-admin-clear" style="width:auto"> Clear the Admin PIN (make page open)</label></div>
+    </div>
+    <div class="actions"><button class="primary" id="save-pins">Save PINs</button>
+      <button id="lock-now">Lock &amp; sign out</button></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="backdrop"><div class="modal" id="modal"></div></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

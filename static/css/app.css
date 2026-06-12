@@ -1,0 +1,241 @@
+/* ===========================================================================
+   Bay Tracking System -- shared stylesheet.
+
+   One visual language across all four pages. Designed for cheap TV browsers:
+   high contrast, big type, no fancy CSS that weak renderers choke on.
+
+   COLORBLIND SAFETY: status is never communicated by color alone. Every tile
+   also carries a text label ("RUNNING", "DELAYED", "IDLE", "ON BREAK") and an
+   icon glyph, so the screen reads correctly in grayscale too.
+   ========================================================================== */
+
+:root {
+  --bg:        #11161c;   /* page background (dark, easy on TVs)           */
+  --panel:     #1b232c;   /* card/panel background                         */
+  --panel-2:   #232e39;   /* nested panel                                  */
+  --text:      #f2f6fa;   /* primary text                                  */
+  --muted:     #9fb0c0;   /* secondary text                                */
+  --border:    #33414f;   /* hairlines                                     */
+
+  /* Status palette. Each has a strong fill + a readable text tone.        */
+  --idle:      #3b4956;   --idle-text:   #c7d3dd;
+  --running:   #1f9d57;   --running-2:   #25b866;   /* green               */
+  --delayed:   #d23b3b;   --delayed-2:   #f5a5a;    /* red                 */
+  --break:     #2f6df0;   --break-2:     #4a86ff;   /* blue (NOT red!)     */
+
+  --accent:    #4a86ff;
+  --warn:      #e6a417;
+  --good:      #25b866;
+  --bad:       #ff5a5a;
+
+  --radius: 12px;
+  --gap: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- top bar (console/stats/admin) ------------------------------------ */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 18px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 50;
+}
+.topbar h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+.topbar .spacer { flex: 1; }
+.topbar a, .navlink {
+  color: var(--muted); text-decoration: none; padding: 6px 12px;
+  border-radius: 8px; font-size: 14px;
+}
+.topbar a:hover { background: var(--panel-2); color: var(--text); }
+.topbar a.active { background: var(--accent); color: #fff; }
+
+/* ---- offline / connection indicator ----------------------------------- */
+#offline-banner {
+  display: none;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+  background: var(--warn); color: #1a1205;
+  text-align: center; font-weight: 700; padding: 8px;
+  font-size: 16px;
+}
+#offline-banner.show { display: block; }
+
+.status-pill {
+  font-size: 12px; padding: 3px 9px; border-radius: 999px;
+  background: var(--good); color: #04210f; font-weight: 700;
+}
+.status-pill.bad { background: var(--bad); color: #2a0606; }
+
+/* ---- generic buttons / inputs ----------------------------------------- */
+button, .btn {
+  font: inherit; cursor: pointer; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text);
+  padding: 10px 14px; border-radius: 8px; font-weight: 600;
+}
+button:hover, .btn:hover { border-color: var(--accent); }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger,  .btn.danger  { background: var(--delayed); border-color: var(--delayed); color: #fff; }
+button.good,    .btn.good    { background: var(--running); border-color: var(--running); color: #fff; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+input, select, textarea {
+  font: inherit; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  width: 100%;
+}
+label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+.hint { font-size: 12px; color: var(--muted); }
+.confirm-note {
+  background: rgba(230,164,23,.12); border: 1px solid var(--warn);
+  color: #f3d18a; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin: 8px 0;
+}
+
+/* =========================================================================
+   THE GRID (shared by dashboard + console)
+   ========================================================================= */
+.grid-wrap { padding: var(--gap); }
+.bay-grid {
+  display: grid; gap: var(--gap);
+  grid-auto-rows: 1fr;
+}
+
+.tile {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--idle);
+  color: var(--idle-text);
+  padding: 14px 16px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  min-height: 120px;
+  border: 2px solid transparent;
+  overflow: hidden;
+}
+.tile.empty-cell { background: transparent; border: 2px dashed var(--border); opacity: .4; }
+.tile.running { background: var(--running); color: #eafff3; }
+.tile.delayed { background: var(--delayed); color: #fff; }
+.tile.on_break { background: var(--break); color: #eef4ff; }
+
+.tile .bay-name { font-size: 15px; font-weight: 700; opacity: .9; display:flex; gap:8px; align-items:center;}
+.tile .state-label {
+  font-size: 12px; font-weight: 800; letter-spacing: 1px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.tile .wo { font-size: 30px; font-weight: 800; line-height: 1.05; margin: 6px 0 0; word-break: break-all; }
+.tile .meta { font-size: 14px; opacity: .92; }
+.tile .elapsed { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tile .reason { font-size: 15px; font-weight: 700; }
+.tile .divtag {
+  font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  background: rgba(0,0,0,.28); display: inline-block;
+}
+.tile .twobay {
+  position:absolute; top:10px; right:12px; font-size: 11px; font-weight:800;
+  background: rgba(0,0,0,.3); padding: 2px 7px; border-radius: 999px;
+}
+.tile-row { display:flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+
+/* clickable console tiles */
+.tile.clickable { cursor: pointer; transition: transform .05s ease; }
+.tile.clickable:hover { border-color: rgba(255,255,255,.55); }
+.tile.clickable:active { transform: scale(.99); }
+
+/* ON BREAK / OFF HOURS banner ribbon */
+#mode-banner {
+  display:none; text-align:center; font-weight:800; letter-spacing:1px;
+  padding:10px; font-size: 18px;
+}
+#mode-banner.break { display:block; background: var(--break); color:#fff; }
+#mode-banner.off   { display:block; background: #3a2a08; color: var(--warn); }
+
+/* =========================================================================
+   DASHBOARD full-screen delay takeover
+   ========================================================================= */
+#takeover {
+  display: none;
+  position: fixed; inset: 0; z-index: 9000;
+  background: linear-gradient(160deg, #6e0d0d, #b21f1f);
+  color: #fff; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 40px;
+}
+#takeover.show { display: flex; }
+#takeover .to-flag { font-size: 28px; font-weight: 800; letter-spacing: 3px; opacity: .85; }
+#takeover .to-bay { font-size: 84px; font-weight: 900; margin: 6px 0; }
+#takeover .to-wo  { font-size: 40px; font-weight: 800; }
+#takeover .to-reason { font-size: 52px; font-weight: 900; margin: 18px 0; }
+#takeover .to-meta { font-size: 24px; opacity: .92; }
+#takeover .to-note {
+  font-size: 22px; margin-top: 18px; max-width: 80%;
+  background: rgba(0,0,0,.22); padding: 12px 18px; border-radius: 12px;
+}
+#takeover .to-count { position:absolute; bottom: 18px; right: 24px; font-size:16px; opacity:.7;}
+
+.icon { font-style: normal; }
+
+/* =========================================================================
+   MODALS (console actions, corrections)
+   ========================================================================= */
+.modal-backdrop {
+  display:none; position: fixed; inset:0; z-index: 8000;
+  background: rgba(0,0,0,.6); align-items: center; justify-content: center; padding: 16px;
+}
+.modal-backdrop.show { display: flex; }
+.modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); width: 460px; max-width: 100%;
+  max-height: 92vh; overflow: auto; padding: 20px;
+}
+.modal h2 { margin: 0 0 4px; font-size: 20px; }
+.modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.modal .actions { display:flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.modal .actions button { flex: 1; min-width: 120px; }
+.action-menu { display:flex; flex-direction: column; gap: 10px; }
+.action-menu button { text-align: left; padding: 14px; font-size: 16px; }
+.error-text { color: var(--bad); font-size: 14px; margin-top: 8px; min-height: 18px; }
+
+/* type-to-filter product list */
+.filter-list { max-height: 180px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-top:6px;}
+.filter-list .opt { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.filter-list .opt:hover, .filter-list .opt.sel { background: var(--accent); color:#fff; }
+.filter-list .opt.other { color: var(--warn); font-weight: 700; }
+
+/* =========================================================================
+   STATS + ADMIN layout
+   ========================================================================= */
+.page { padding: 18px; max-width: 1200px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 12px; font-size: 18px; }
+.row { display: flex; gap: 14px; flex-wrap: wrap; }
+.col { flex: 1; min-width: 220px; }
+.grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 800px){ .grid2 { grid-template-columns: 1fr; } }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+tr.stale td { background: rgba(210,59,59,.14); }
+.badge { font-size:11px; padding:2px 7px; border-radius:999px; background:var(--panel-2); }
+.badge.stale { background: var(--delayed); color:#fff; }
+.badge.open { background: var(--warn); color:#1a1205; }
+.no-data { color: var(--muted); font-style: italic; padding: 12px; text-align:center; }
+canvas { max-width: 100%; }
+
+.kpi { display:flex; gap: 16px; flex-wrap: wrap; }
+.kpi .box { background: var(--panel-2); border-radius: 10px; padding: 14px 18px; min-width: 140px; }
+.kpi .box .n { font-size: 28px; font-weight: 800; }
+.kpi .box .l { font-size: 12px; color: var(--muted); }
+
+.toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: flex-end; }
+.toolbar .col { min-width: 150px; flex: 0 1 auto; }
+
+/* unlock page */
+.unlock-wrap { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
+.unlock-card { width: 340px; text-align:center; }
+.unlock-card .lock { font-size: 44px; }

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Bay Dashboard{% endblock %}
+
+{# The dashboard is a kiosk view: no nav bar, full-screen, glanceable. #}
+{% block topbar %}{% endblock %}
+
+{% block content %}
+<div id="mode-banner"></div>
+
+<div class="grid-wrap">
+  <div id="grid" class="bay-grid"></div>
+</div>
+
+<!-- tiny corner status: connection + clock + optional division filter -->
+<div style="position:fixed;bottom:10px;left:14px;font-size:13px;color:var(--muted);">
+  <span id="clock"></span>
+  {% if division %}<span> · Filter: <b>{{ division }}</b></span>{% endif %}
+  <span id="dash-conn"></span>
+</div>
+
+<!-- full-screen delay takeover -->
+<div id="takeover">
+  <div class="to-flag"><span class="icon">⚠</span> DELAY FLAGGED</div>
+  <div class="to-bay" id="to-bay"></div>
+  <div class="to-wo" id="to-wo"></div>
+  <div class="to-reason" id="to-reason"></div>
+  <div class="to-meta" id="to-meta"></div>
+  <div class="to-note" id="to-note"></div>
+  <div class="to-count" id="to-count"></div>
+</div>
+
+<!-- click-to-expand tile detail (read-only) -->
+<div class="modal-backdrop" id="detail-backdrop">
+  <div class="modal" id="detail-modal"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.BT_DIVISION = {{ division|tojson }};</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# Bay Tracking System -- Python dependencies, EXACTLY pinned (Appendix B1).
+#
+# Exact pins (== not >=) so that a deployment done years from now installs the
+# identical, known-good versions and behaves identically. These were captured
+# from a clean install on Python 3.14. Update them deliberately via update.ps1,
+# never by floating to "latest".
+#
+# Install into the repo-local venv:   pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- Direct dependencies -------------------------------------------------
+Flask==3.1.3          # web framework (routing, templates, sessions)
+waitress==3.0.2       # production-grade pure-Python WSGI server (Windows-friendly)
+openpyxl==3.1.5       # writes the .xlsx export workbook (with text-typed cells)
+
+# --- Transitive dependencies (pinned for a fully reproducible install) ---
+Werkzeug==3.1.8       # WSGI utilities used by Flask (also provides password hashing)
+Jinja2==3.1.6         # template engine used by Flask
+MarkupSafe==3.0.3     # safe string escaping used by Jinja2
+itsdangerous==2.2.0   # signs the session cookie that backs the PIN gate
+click==8.4.1          # CLI plumbing pulled in by Flask
+blinker==1.9.0        # signal support pulled in by Flask
+colorama==0.4.6       # colored terminal output on Windows (pulled in by click)
+et-xmlfile==2.0.0     # XML streaming writer used by openpyxl

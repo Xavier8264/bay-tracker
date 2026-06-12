@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# Bay Tracking System -- .gitignore
+#
+# RULE (Appendix B1/B2): the database and all generated/working files must
+# NEVER be committed. The live database lives OUTSIDE this repo entirely, in
+# the BAYTRACKER_DATA folder -- but we still ignore db files here as a
+# belt-and-suspenders guard in case someone points BAYTRACKER_DATA at the repo
+# by mistake during local testing.
+# ---------------------------------------------------------------------------
+
+# SQLite database + its write-ahead / journal sidecar files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Backups and logs
+*.bak
+*.log
+backups/
+
+# Generated exports (Stats page writes these to a temp/working dir)
+exports/
+*.xlsx
+*.csv
+# ...but DO keep the committed sample Data Dictionary text if we ship one:
+!docs/*.csv
+
+# Python virtual environment + caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
