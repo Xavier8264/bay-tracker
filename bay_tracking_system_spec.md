@@ -303,3 +303,191 @@ from §5 and sample divisions/reasons so it runs immediately. Keep the code simp
 heavily commented — this will be maintained by an engineering intern, not a dedicated dev team. Where this
 spec leaves a value unspecified (exact shift/break times, weekend schedule), implement it as editable
 settings with the placeholder defaults and a clear "confirm these" note in the UI.
+
+---
+
+## Appendix A: Deployment & How to Launch (Detailed)
+
+This expands on §9. It describes how to run the system in the real plant. **Default to the local
+PC option (A1) — it requires no special permissions and keeps all traffic on the LAN.** Do not host
+this on the public internet (see A4 for why).
+
+### A0. The mental model
+
+Only **one machine runs the application** — the server. It has an address on the local network, e.g.
+`http://192.168.1.50:5000`. Every TV, streaming stick, and the logging computer is just a **browser**
+pointed at that address (`/dashboard` for displays, `/console` for the logging PC, `/stats` and
+`/admin` for management). The displays run nothing themselves — they show a web page. So the system
+is: one local server + many browser clients on the same network.
+
+### A1. Option A — Run on a Windows PC on the LAN (recommended starting point)
+
+No IT permission required beyond being on the network.
+
+1. **Install Python 3** on an always-on PC (check "Add Python to PATH" during install).
+2. **Install dependencies** in the app folder: `pip install -r requirements.txt`
+   (Flask, waitress, plus whatever the app needs). `requirements.txt` ships with the app.
+3. **Initialize the database** (creates the SQLite file and seeds default config): `python init_db.py`
+4. **Run the server** with a production WSGI server (waitress) bound to all interfaces so other
+   devices can reach it:
+   ```
+   waitress-serve --listen=0.0.0.0:5000 app:app
+   ```
+   (Adjust `app:app` to the actual module:object the app exposes.)
+5. **Find the PC's IP:** open Command Prompt and run `ipconfig`; note the IPv4 address.
+6. **Pin that IP so it never changes** — set a **DHCP reservation** for this PC's MAC address on the
+   network router (ask whoever manages the network). If the IP shifts, every display breaks.
+7. **Open the port in Windows Firewall** (run as admin):
+   ```
+   netsh advfirewall firewall add rule name="BayTracker" dir=in action=allow protocol=TCP localport=5000
+   ```
+8. **Make it start automatically on boot** so a reboot brings it back with no intervention. Cleanest
+   way is to run it as a Windows service with NSSM (https://nssm.cc):
+   ```
+   nssm install BayTracker "C:\Path\to\python.exe" "-m waitress --listen=0.0.0.0:5000 app:app"
+   nssm set BayTracker AppDirectory "C:\Path\to\app"
+   nssm start BayTracker
+   ```
+   (A Task Scheduler "At startup" task running the same command also works.)
+9. **Point each display** at `http://<PC-IP>:5000/dashboard` (optionally `?division=<name>` to filter).
+   Point the logging computer at `http://<PC-IP>:5000/console`.
+
+Tradeoff: this PC must stay powered on. It's the fast, fully-in-your-control path to prove the system
+works before involving IT.
+
+### A2. Option B — Host on a plant server (more permanent; needs IT)
+
+The application is **identical** — only where it runs and its address change. Ask IT for: a small VM
+or hosting spot that can run a Python web app, a **stable internal hostname or static IP**, and an
+open port. Deploy the same app there, run it under waitress (IT may front it with nginx/IIS), and
+point devices at `http://<hostname>/dashboard`. IT will care about backups and access control — the
+PIN-gated `/stats` and `/admin`, plus the scheduled SQLite backup (A5), cover the basics. Recommended
+path overall: **launch on a PC (A1) to prove it, then migrate here once IT is willing to host it.**
+
+### A3. Network reliability on weak/spotty wifi (important here)
+
+Because this floor has perpetually weak wifi, reduce how much depends on it:
+
+- **Hard-wire the server and the logging computer** (the one between bays 10/11). Neither should ever
+  be on wifi — they are the source of truth and the critical input point.
+- **Strongly consider a dedicated network for this system** — a cheap router/switch plus one or two
+  access points near display clusters, isolated from the congested plant wifi. This is the biggest
+  single improvement: you control the link quality instead of competing for the shared wifi.
+- **Wire displays with ethernet wherever cable runs are feasible;** use wifi only for stragglers.
+- The dashboard moves only kilobytes, so even weak wifi is fine **if it stays connected**. The app
+  auto-reconnects and shows "last updated X ago / OFFLINE" if a link drops, and because elapsed time
+  is computed from stored timestamps, a blip never desyncs or loses data — the device self-corrects on
+  reconnect, and the rest of the system keeps running. This graceful behavior only holds with a **local**
+  server (A1/A2); internet hosting would make every device depend on the weak wifi plus the internet
+  uplink at once.
+
+### A4. Option C — Public internet / HTTPS website (NOT recommended for this use case)
+
+Technically feasible (deploy to a cloud host, attach a domain, get an auto-renewing certificate for
+`https://`), but wrong for this system:
+
+- It makes the weak wifi **worse**: every device, including ones in the same room as each other, now
+  round-trips out through the spotty wifi and the plant's internet uplink to reach the server.
+- A plant internet outage takes the **entire** system down, even on-site.
+- It exposes an internal operations tool (including cost data) to the public web, requiring real
+  authentication, hardening, and almost certainly IT/security approval.
+
+Only justify going public if genuine **off-site** access is required — and even then, prefer a **VPN**
+into the local server over exposing it publicly. **HTTPS is not needed for a LAN deployment**; plain
+`http://` on your own network is appropriate, and self-signed certificates would only produce browser
+warnings on the TVs.
+
+### A5. Display device setup
+
+- **Most reliable:** a Fire TV Stick (or similar) plugged into any TV's HDMI port, with the **Silk
+  browser** opened to the dashboard URL. The TV is just a monitor; its own OS doesn't matter. This
+  avoids the fact that **Roku-based smart TVs (common at Walmart) have no web browser** and can't load
+  the page directly. If buying a smart TV, choose a **Google TV / Android** model, or just use a stick.
+- Plug in a cheap USB/Bluetooth **keyboard** to type the URL once (remote navigation is tedious).
+- In the device settings, **disable sleep/screensaver** so the dashboard stays up.
+- **Ethernet to a Fire Stick:** it has no built-in port — use a ~$15 micro-USB (or USB-C, matching the
+  stick model) ethernet adapter into the power port. Many smart TVs have a built-in LAN port; check the
+  spec sheet for "Ethernet/LAN."
+- **For true set-and-forget kiosks** (auto-launch the URL on boot, survive power blips with no human
+  action), a small mini-PC or Raspberry Pi running Chrome in kiosk mode is the most robust option, at a
+  bit more setup than a stick. Worth it once the number of screens grows.
+
+### A6. Backups
+
+The entire history is one SQLite file on the server. Schedule a periodic copy of it to a network share
+(Windows Task Scheduler + a copy script, or a backup setting in `/admin`) so a dead server doesn't
+erase the log. The CSV/XLSX exports are a secondary safety net but are not a substitute for copying the
+database file itself.
+
+---
+
+## Appendix B: Source Control, Setup, and Updates (built for long-term reliability)
+
+This appendix specifies how the project must be structured so it can be deployed from GitHub to a
+Windows floor PC and updated safely **for years, without ever risking the accumulated log.** These are
+mandatory requirements, not suggestions — the safety of the data depends on them.
+
+### B1. Repository layout
+
+- The WSGI app is exposed as `app:app`.
+- `requirements.txt` with **exact pinned versions** (e.g. `Flask==3.0.3`), installed into a `venv`.
+- `init_db.py` — see B3.  `migrate.py` — see B4.
+- `tools/nssm.exe` — the service wrapper, **vendored (committed) into the repo** so deployment never
+  depends on an external download being available years from now.
+- `setup.ps1` (one-time install) and `update.ps1` (safe update) — committed to the repo.
+- `README.md` documenting both scripts and the data location.
+- `.gitignore` that excludes all data and generated files: `*.db`, `*.db-journal`, `*.db-wal`,
+  `*.bak`, `*.log`, `venv/`. **The database must never be committed.**
+
+### B2. Code and data MUST live in separate folders (this is what protects the log)
+
+- All persistent data — the SQLite database and its backups — lives in a directory given by the
+  environment variable **`BAYTRACKER_DATA`** (e.g. `C:\BayTrackerData`), which is **outside the repo
+  folder**.
+- The application reads `BAYTRACKER_DATA` at startup to locate its database. It must never read or
+  write the database inside the repo directory.
+- Rationale: git operations (clone, checkout, pull) only ever modify files **inside the repo folder**.
+  Because the database lives in a different folder, updating the code physically cannot touch the log.
+  This separation is non-negotiable and is the primary guarantee against data loss during updates.
+
+### B3. `init_db.py` must be non-destructive
+
+- Creates the database file and tables only if they do not already exist (`CREATE TABLE IF NOT EXISTS`).
+- Must be safe to run against an existing, populated database, and must NEVER drop, truncate,
+  overwrite, or reset existing data.
+- Seeds default config (bays, delay reasons, divisions, etc.) only into tables that are empty.
+
+### B4. `migrate.py` must be additive and idempotent
+
+- Applies schema changes forward only (e.g. add a table or column **if it does not already exist**).
+- Safe to run repeatedly; never destructive.
+- Invoked by `update.ps1` **after** the database has been backed up.
+- This is how the accumulated log survives future schema changes intact.
+
+### B5. Health endpoint
+
+- Expose `GET /healthz` returning HTTP 200 when the app is up. `update.ps1` uses it to confirm a new
+  version started correctly and to trigger automatic rollback if it did not.
+
+### B6. Run as a resilient service
+
+- Runs under NSSM as an **auto-start** Windows service that **auto-restarts on crash** and requires
+  **no internet to launch** — it serves entirely from local files. GitHub is contacted only during a
+  deliberate update.
+
+### B7. Update model (deliberate and reversible)
+
+- Releases are **git tags** (e.g. `v1.3.0`). The floor PC always runs a known tag, never bare `main`.
+- `update.ps1` (1) backs up the DB, (2) records the current version, (3) deploys the chosen tag,
+  (4) updates pinned deps, (5) runs `migrate.py`, (6) restarts, (7) health-checks, and
+  (8) **automatically rolls back to the previous version if the health check fails.**
+- **Never** configure the production machine to auto-pull from GitHub and self-restart. Updates are
+  always an intentional, human-triggered action.
+
+### B8. Backups
+
+- `update.ps1` writes a timestamped copy of the database to `BAYTRACKER_DATA\backups\` before every
+  update.
+- Additionally, schedule a periodic copy of the live database to a network share (per §9 / Appendix A6).
+- The database file is the only irreplaceable asset in the entire system — every other part can be
+  rebuilt from the repo. Protect it accordingly.
