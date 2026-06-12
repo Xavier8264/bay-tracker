@@ -27,36 +27,96 @@ so updating the code physically cannot touch the accumulated log.
 
 ---
 
-## Quick start (Windows floor PC)
+## Get it running (clone → install → launch on the network)
 
-From the repo folder, in PowerShell:
+Do these steps on the **one PC that will be the server**. They put the app on a LAN
+port that every other machine (TVs, the logging PC, your laptop) can reach in a browser.
+
+**Prerequisites:** install **Python 3** (from [python.org](https://www.python.org/) — tick
+**"Add Python to PATH"**) and **git**. Commands below are PowerShell on Windows.
+
+### 1. Clone the repository
 
 ```powershell
-# Basic install: venv + deps + data folder + database
-powershell -ExecutionPolicy Bypass -File .\setup.ps1
-
-# Full production install (run an ELEVATED PowerShell):
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService
+# Clone to a plain local path (a OneDrive/Dropbox-synced folder is fine for the CODE,
+# but the DATABASE must not live in one -- see step 2).
+git clone <your-repo-url> C:\BayTracking
+cd C:\BayTracking
 ```
 
-`setup.ps1` will:
-1. find Python 3 and create a repo-local `venv`,
-2. install the exact pinned dependencies (`requirements.txt`),
-3. set `BAYTRACKER_DATA` (default `C:\BayTrackerData`),
-4. create + seed the database (non-destructive — safe to re-run),
-5. optionally open the firewall port and install the auto-start service.
+### 2. Install the requirements
 
-It prints the URLs to point devices at when it finishes.
+**Option A — one command (recommended).** `setup.ps1` creates a repo-local `venv`, installs
+the exact pinned dependencies from `requirements.txt`, sets `BAYTRACKER_DATA`, and creates +
+seeds the database. Safe to re-run.
 
-### Run it without a service (foreground)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+**Option B — do it by hand** (same result, explicit steps):
+
+```powershell
+python -m venv venv                                            # create the virtual environment
+venv\Scripts\python.exe -m pip install --upgrade pip
+venv\Scripts\python.exe -m pip install -r requirements.txt     # install all dependencies
+$env:BAYTRACKER_DATA = "C:\BayTrackerData"                     # where the database lives (NOT on OneDrive)
+venv\Scripts\python.exe init_db.py                             # create + seed the database
+```
+
+> The database is kept in `BAYTRACKER_DATA` (default `C:\BayTrackerData`), **outside the repo**,
+> so updating the code can never touch your data. Keep it on a plain local disk — cloud-synced
+> folders corrupt live SQLite files.
+
+### 3. Launch it on a network-reachable port
 
 ```powershell
 $env:BAYTRACKER_DATA = "C:\BayTrackerData"
 venv\Scripts\python.exe -m waitress --listen=0.0.0.0:5000 --threads=32 app:app
 ```
 
-`--threads=32` gives headroom for one long-lived SSE connection per TV + the console.
-Set it comfortably above your number of screens.
+- **`0.0.0.0` is the part that makes it reachable from other machines** — it binds every
+  network interface. (`127.0.0.1` / `localhost` would only work on this PC.)
+- `5000` is the port. Change it here (and everywhere below) if 5000 is taken.
+- `--threads=32` leaves headroom for one long-lived connection per TV + the console; set it
+  comfortably above your number of screens.
+
+Leave that window open — the server is now running. (For a quick local-only smoke test you can
+instead run `venv\Scripts\python.exe app.py`; use **waitress** for the real deployment.)
+
+**Open the firewall** so other machines aren't blocked — run this once in an **elevated**
+PowerShell (or use `setup.ps1 -OpenFirewall`):
+
+```powershell
+netsh advfirewall firewall add rule name="BayTracker" dir=in action=allow protocol=TCP localport=5000
+```
+
+### 4. Point another machine at it
+
+1. On the **server PC**, find its LAN address: run `ipconfig` and note the **IPv4 Address**
+   (e.g. `192.168.1.50`).
+2. From **any other machine on the same network**, open a browser to that IP and port:
+
+   | For | URL (substitute your server's IP) |
+   | --- | --- |
+   | TV dashboard | `http://192.168.1.50:5000/dashboard` |
+   | Logging console | `http://192.168.1.50:5000/console` |
+   | Stats / Admin | `http://192.168.1.50:5000/stats` and `/admin` |
+
+   Add `?division=<name>` to a dashboard URL (e.g. `/dashboard?division=Assembly`) to make that
+   TV take over full-screen only for its own division's delays.
+
+3. **Pin the address:** set a **DHCP reservation** on your router for the server PC so its IPv4
+   never changes — otherwise every display breaks when the address shifts.
+
+> **Reachable from the server but not from other machines?** It's almost always one of:
+> the server bound `127.0.0.1` instead of `0.0.0.0` (step 3), the firewall rule is missing
+> (step 3), or the two machines are on different networks/VLANs. Test from the server first
+> with `http://localhost:5000/healthz`, then from the other machine with the server's IP.
+
+For a full production install that also opens the firewall **and** installs an auto-start,
+auto-restart Windows service, run (elevated): `powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService`.
+See *Run it as a service* below to keep it alive across reboots.
 
 ---
 
