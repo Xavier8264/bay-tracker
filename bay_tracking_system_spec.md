@@ -491,3 +491,53 @@ mandatory requirements, not suggestions — the safety of the data depends on th
 - Additionally, schedule a periodic copy of the live database to a network share (per §9 / Appendix A6).
 - The database file is the only irreplaceable asset in the entire system — every other part can be
   rebuilt from the repo. Protect it accordingly.
+
+  ---
+
+## Appendix C: Data Integrity — No Test Data, No Fabricated Data (mandatory)
+
+This appendix **overrides** any earlier instruction to "seed default config," "sample reasons/divisions,"
+or "so it runs immediately" in the main spec (§12) and Appendix B. Configuration is entered by the user,
+never pre-filled with invented examples.
+
+### C1. The database starts empty of all operational records
+
+- `init_db.py` creates **table structures only** and inserts **zero operational rows**.
+- No sample, demo, example, or test units, work orders, runs, delays, mates, or log events are ever
+  created — not at install, not on first run, not ever.
+- There is **no "load demo data," "populate examples," or seed-sample mode** anywhere in the system,
+  and no fake-data library (e.g. Faker) is used in any part of the codebase.
+
+### C2. The system never fabricates a value — anywhere, ever
+
+Every stored value must originate from a real technician action or an explicit human entry in admin.
+The system must never invent, estimate, randomize, interpolate, extrapolate, default-fill, or
+placeholder a value. Specifically:
+
+- **Never guess or auto-fill a missing field** — start time, end time, initials, reason, note,
+  duration, product number, division, etc. If a value is unknown, it stays unknown/blank. It is never
+  invented to make a record look complete.
+- **Open records stay open.** If a run or delay was never closed, it is represented as open/unknown.
+  The system must never assign a made-up end time or duration to "complete" it. (Corrections happen
+  only through the explicit human correction flow, with initials.)
+- **Stats show only real recorded data.** For any period or grouping with no data, display "no data" —
+  never interpolate, extrapolate, project, average-in, or fill gaps with estimated numbers. Charts plot
+  only real recorded points.
+- **Cost is computed strictly** as (real recorded delay time × the labor rate the user entered). If no
+  rate has been entered, show no cost figure — never assume or default a rate.
+- **Exports (CSV/XLSX) contain only real recorded rows** — no synthesized, padded, or example rows.
+
+### C3. The only auto-created records are empty bay slots (structure, not data)
+
+- On first run the system creates one record per bay (per the configured bay count) so the grid has
+  boxes to display. These are **structural slots that hold no operational data** — each bay is simply
+  IDLE until a real action is logged against it.
+- This is the sole exception to C1, and it introduces no fabricated data.
+
+### C4. All other configuration starts empty and is entered by the user
+
+- Delay reasons, divisions, product numbers, the initials roster, and the shift/break/operating
+  schedule all start **empty**. The user populates them in the admin/settings pages with real values.
+- Nothing is pre-filled with example or placeholder values — including the shift and break times.
+- The single permitted default is the mandatory **"Other"** delay reason, which may exist by default
+  because the design requires it always be present and pinned to the bottom of the list.
