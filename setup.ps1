@@ -125,7 +125,7 @@ Write-Host ""
 Write-Host "=== Setup complete ===" -ForegroundColor Cyan
 if (-not $InstallService) {
     Write-Host "To run the server now (foreground):"
-    Write-Host "    venv\Scripts\python.exe -m waitress --listen=0.0.0.0:$Port --threads=$Threads app:app" -ForegroundColor Yellow
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\start.ps1" -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "Point devices at:"

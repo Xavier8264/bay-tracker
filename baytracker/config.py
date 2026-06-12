@@ -38,7 +38,19 @@ def _default_data_dir() -> Path:
     return Path.home() / "BayTrackerData"
 
 
-DATA_DIR: Path = Path(os.environ.get("BAYTRACKER_DATA", str(_default_data_dir())))
+def _resolve_data_dir() -> Path:
+    """Resolve BAYTRACKER_DATA defensively.
+
+    People set environment variables with stray quotes or whitespace
+    ($env:BAYTRACKER_DATA = '"C:\\BayTrackerData"'), which produces a path that
+    can never be created and a very confusing "unable to open database file"
+    later. Strip that here, and treat an empty/blank value as unset.
+    """
+    raw = os.environ.get("BAYTRACKER_DATA", "").strip().strip('"').strip("'").strip()
+    return Path(raw) if raw else _default_data_dir()
+
+
+DATA_DIR: Path = _resolve_data_dir()
 
 # Sub-locations within the data folder.
 DB_PATH: Path = DATA_DIR / "baytracker.db"

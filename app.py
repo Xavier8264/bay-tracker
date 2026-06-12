@@ -21,8 +21,8 @@ from flask import (Flask, Response, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 from io import BytesIO
 
-from baytracker import (__version__, actions, auth, config, db, events,
-                        exports, metrics, state)
+from baytracker import (__version__, actions, auth, bootstrap, config, db,
+                        events, exports, metrics, state)
 from baytracker.app_db import close_db, get_db
 from baytracker.actions import ActionError
 from baytracker.sse import broker
@@ -34,6 +34,24 @@ HEARTBEAT_SECONDS = 5
 
 
 def create_app() -> Flask:
+    # Make startup self-sufficient: create the data folder, the database, the
+    # schema and the structural seed rows if any of them are missing. Every
+    # step is idempotent and non-destructive (same code path as init_db.py),
+    # so a populated database is never touched -- but a fresh PC, a deleted
+    # data folder, or a skipped init_db.py no longer produce a server that
+    # answers 500 on every page.
+    config.ensure_data_dirs()
+    _conn = db.connect()
+    try:
+        db.create_schema(_conn)
+        bootstrap.seed(_conn)
+    finally:
+        _conn.close()
+    # Say where the data lives, loudly, so a wrong BAYTRACKER_DATA is obvious
+    # in the console / service log instead of silently using the wrong folder.
+    print(f"[baytracker] v{__version__}  data folder: {config.DATA_DIR}  "
+          f"database: {config.DB_PATH}", flush=True)
+
     app = Flask(__name__)
     app.secret_key = config.get_secret_key()
     app.config["JSON_SORT_KEYS"] = False
@@ -118,7 +136,10 @@ def create_app() -> Flask:
         resp = Response(stream(), mimetype="text/event-stream")
         resp.headers["Cache-Control"] = "no-cache"
         resp.headers["X-Accel-Buffering"] = "no"   # don't let any proxy buffer SSE
-        resp.headers["Connection"] = "keep-alive"
+        # NOTE: do NOT set a "Connection" header here. It is hop-by-hop, which
+        # PEP 3333 forbids a WSGI app from setting -- waitress aborts the whole
+        # response with an AssertionError, killing the SSE stream. HTTP/1.1
+        # connections are keep-alive by default anyway.
         return resp
 
     @app.route("/api/state")

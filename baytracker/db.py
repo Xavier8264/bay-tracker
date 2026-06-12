@@ -169,6 +169,12 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
       the append-only, never-rewrite-history design.
     """
     path = Path(db_path) if db_path else config.DB_PATH
+    # Self-heal a missing data folder. If the folder named by BAYTRACKER_DATA
+    # was deleted (or never created), SQLite fails with the unhelpful
+    # "unable to open database file" on EVERY request. Creating the folder here
+    # turns that permanent failure into a clean recovery; mkdir(exist_ok=True)
+    # is a no-op whenever the folder is already there.
+    path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")

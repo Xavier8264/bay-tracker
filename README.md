@@ -70,19 +70,56 @@ venv\Scripts\python.exe init_db.py                             # create + seed t
 
 ### 3. Launch it on a network-reachable port
 
+**Always launch with `start.ps1`:**
+
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+`start.ps1` exists because a hand-typed launch can go quietly wrong in ways that *look* like
+a broken app (blank dashboard, "Internal Server Error"). It guarantees, every time, that:
+
+- the server runs **this repo's code with this repo's venv** (you can't accidentally serve a
+  different checkout of the project, or use another copy's Python);
+- `BAYTRACKER_DATA` is set sanely (your machine-level value, or `C:\BayTrackerData`), and
+  cloud-synced paths are refused;
+- **the port is genuinely free.** If some older process is still holding port 5000, it names
+  that process and stops — because otherwise the new server would die with "address in use"
+  while every browser keeps talking to the *old* one. If the old listener is a stuck Bay
+  Tracking server, replace it with:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\start.ps1 -Force
+  ```
+
+On startup the server prints exactly which data folder and database it is using:
+
+```text
+[baytracker] v1.0.0  data folder: C:\BayTrackerData  database: C:\BayTrackerData\baytracker.db
+```
+
+Check that line whenever anything looks off. The app also self-heals on startup: a missing
+data folder, database, schema, or seed rows are created automatically (idempotently — an
+existing populated database is never touched).
+
+Leave that window open — the server is now running. Useful options:
+`-Port 8080` (serve elsewhere), `-Threads 64` (more screens; default 32 leaves headroom for
+one long-lived connection per TV + the console).
+
+<details>
+<summary>Manual launch (what start.ps1 runs for you)</summary>
+
+```powershell
+cd C:\BayTracking                       # MUST be the repo folder (waitress imports app.py from here)
 $env:BAYTRACKER_DATA = "C:\BayTrackerData"
 venv\Scripts\python.exe -m waitress --listen=0.0.0.0:5000 --threads=32 app:app
 ```
 
 - **`0.0.0.0` is the part that makes it reachable from other machines** — it binds every
   network interface. (`127.0.0.1` / `localhost` would only work on this PC.)
-- `5000` is the port. Change it here (and everywhere below) if 5000 is taken.
-- `--threads=32` leaves headroom for one long-lived connection per TV + the console; set it
-  comfortably above your number of screens.
-
-Leave that window open — the server is now running. (For a quick local-only smoke test you can
-instead run `venv\Scripts\python.exe app.py`; use **waitress** for the real deployment.)
+- Use the `venv\Scripts\python.exe` **inside this repo** — not a global Python and not a venv
+  from another copy of the project.
+</details>
 
 **Open the firewall** so other machines aren't blocked — run this once in an **elevated**
 PowerShell (or use `setup.ps1 -OpenFirewall`):
@@ -113,6 +150,37 @@ netsh advfirewall firewall add rule name="BayTracker" dir=in action=allow protoc
 > the server bound `127.0.0.1` instead of `0.0.0.0` (step 3), the firewall rule is missing
 > (step 3), or the two machines are on different networks/VLANs. Test from the server first
 > with `http://localhost:5000/healthz`, then from the other machine with the server's IP.
+
+### Troubleshooting: blank dashboard / "Internal Server Error"
+
+Work down this list — it covers every known cause:
+
+1. **Is the server you think is running actually the one answering?** If a previous server
+   (e.g. a dev copy run from another folder) is still alive, a new launch dies instantly with
+   *address already in use* — your prompt comes back, and the browser keeps talking to the
+   **old** process. Check what holds the port and replace it:
+
+   ```powershell
+   Get-NetTCPConnection -LocalPort 5000 -State Listen |
+       ForEach-Object { Get-Process -Id $_.OwningProcess }
+   powershell -ExecutionPolicy Bypass -File .\start.ps1 -Force   # kill it and take over
+   ```
+
+2. **What does the health check actually say?** `/healthz` returns the underlying error text:
+
+   ```powershell
+   curl.exe -s http://localhost:5000/healthz
+   # {"status":"ok","version":"1.0.0"}                      <- healthy
+   # {"error":"unable to open database file", ...}          <- the data folder the SERVER
+   #    sees is missing/unwritable: its BAYTRACKER_DATA differs from yours, or the folder
+   #    was deleted. Restart with start.ps1 (current code also recreates it automatically).
+   ```
+
+3. **Which data folder is the server using?** The first line it prints on startup says.
+   If it isn't the folder you expect (`C:\BayTrackerData`), the launching shell had a stray
+   `BAYTRACKER_DATA` — close that shell and relaunch with `start.ps1`.
+
+4. **Hard refresh the browser** (`Ctrl+F5`). A TV that cached a failed page can sit on it.
 
 For a full production install that also opens the firewall **and** installs an auto-start,
 auto-restart Windows service, run (elevated): `powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService`.
@@ -176,8 +244,8 @@ or loses data; the device self-corrects on reconnect.
 in the repo (see `tools\README.txt`), then run `setup.ps1 -InstallService`.
 
 **Alternative — Task Scheduler:** create an "At startup" task running
-`venv\Scripts\python.exe -m waitress --listen=0.0.0.0:5000 --threads=32 app:app` with the repo
-as the working directory and `BAYTRACKER_DATA` set for that account.
+`powershell -ExecutionPolicy Bypass -File C:\BayTracking\start.ps1 -Force` (the `-Force`
+makes a reboot-after-crash always win the port).
 
 ---
 
@@ -249,6 +317,7 @@ init_db.py        Create + seed the DB (non-destructive)
 migrate.py        Forward-only, idempotent schema migrations
 backup_db.py      Consistent online backup of the DB
 setup.ps1         One-time install     update.ps1   Safe, reversible update
+start.ps1         THE way to launch by hand (right venv, right data dir, port checks)
 backup.ps1        Scheduled backup wrapper
 requirements.txt  Exactly pinned dependencies
 baytracker/       Application package:
@@ -267,11 +336,17 @@ The `.gitignore` excludes all data and generated files (`*.db`, backups, exports
 ## Developer notes
 
 ```powershell
-# Run locally (Flask dev server, foreground):
-$env:BAYTRACKER_DATA = "C:\BayTrackerData_dev"
-venv\Scripts\python.exe init_db.py
-venv\Scripts\python.exe app.py        # http://localhost:5000
+# Run locally (waitress, foreground) on a DEV port and a DEV data folder:
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -Port 5001 -DataDir C:\BayTrackerData_dev
 ```
+
+Two rules that prevent the most confusing failure this project has had:
+
+- **Never run a dev server on the production port (5000).** A forgotten dev server keeps the
+  port; the real launch then dies with "address in use" while every display talks to the
+  broken dev copy. Dev runs on **5001**.
+- **Keep the dev data folder separate** (`C:\BayTrackerData_dev`) so experiments never touch
+  the real log. If you delete it, the server recreates it (empty) on the next start.
 
 Keep the code simple and heavily commented — it's meant to be maintained by an engineering
 intern, not a dedicated dev team. The time-accounting rules (active/delay/queue/cycle, the union
