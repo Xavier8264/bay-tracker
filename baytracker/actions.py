@@ -215,9 +215,9 @@ def unit_complete(conn, work_order, initials):
     return _terminal(conn, "UNIT_COMPLETE", work_order, initials)
 
 
-def scrap(conn, work_order, initials):
-    """Terminal: the unit is scrapped."""
-    return _terminal(conn, "SCRAP", work_order, initials)
+# NOTE: scrapping was removed as a loggable action (2026-06). The SCRAP event
+# type still exists in events.py/state.py so any historical scrap rows in an
+# existing log keep replaying correctly -- but nothing can create new ones.
 
 
 # ---------------------------------------------------------------------------

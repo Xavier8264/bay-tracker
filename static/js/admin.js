@@ -4,8 +4,10 @@
    Loads everything from /api/admin/data, renders editable tables, and POSTs
    changes back. Nothing is pre-filled with invented values: the shift/break/
    operating times in particular start empty and the user enters the real ones.
-   Config rows are soft-retired (active=0), never hard-deleted, so historical
-   events that reference them stay valid.
+   Config rows referenced by id (reasons, divisions, products, bays) are
+   soft-retired (active=0), never hard-deleted, so historical events stay
+   valid. Initials are the one exception: hard-deleted to keep the roster
+   short (events snapshot the initials text, so history is unaffected).
    ========================================================================== */
 (function () {
   const WEEK = [["mon","Mon"],["tue","Tue"],["wed","Wed"],["thu","Thu"],["fri","Fri"],["sat","Sat"],["sun","Sun"]];
@@ -75,13 +77,15 @@
   }
 
   // ---- Initials ----
+  // Initials are hard-DELETED (not soft-retired) on purpose: the roster is
+  // only an autocomplete list and events keep the initials text itself, so
+  // the list stays short instead of accumulating retired names for years.
   function renderInitials() {
     $("initials").innerHTML = data.initials.map(i =>
       `<tr><td>${esc(i.initials)}</td><td>${esc(i.name || "")}</td>
-        <td>${i.active ? "active" : '<span class="badge">retired</span>'}</td>
         <td style="text-align:right">
           <button class="btn" data-edit-initials='${JSON.stringify(i).replace(/'/g,"&#39;")}'>Edit</button>
-          <button class="btn" data-toggle-initials="${i.id}" data-op="${i.active ? "retire" : "activate"}">${i.active ? "Retire" : "Activate"}</button>
+          <button class="btn" data-delete-initials="${i.id}" data-ini="${esc(i.initials)}">Delete</button>
         </td></tr>`).join("") || `<tr><td class="no-data">none yet</td></tr>`;
   }
 
@@ -114,10 +118,11 @@
   // ---- Shifts ----
   function renderShifts() {
     $("shifts").innerHTML = shifts.map((s, i) =>
-      `<tr><td><input value="${esc(s.name || "")}" data-sh="${i}" data-f="name" placeholder="Shift 1"></td>
+      `<tr><td><input value="${esc(s.name || "")}" data-sh="${i}" data-f="name" placeholder="Day"></td>
         <td><input value="${esc(s.start || "")}" data-sh="${i}" data-f="start" placeholder="06:00" style="width:90px"></td>
+        <td><input value="${esc(s.end || "")}" data-sh="${i}" data-f="end" placeholder="14:00" style="width:90px"></td>
         <td><button class="btn" data-del-shift="${i}">✕</button></td></tr>`).join("")
-      || `<tr><td colspan="3" class="no-data">no shifts — add the real cutoffs</td></tr>`;
+      || `<tr><td colspan="4" class="no-data">no shifts — add the real ones</td></tr>`;
   }
 
   // ---- Operating calendar ----
@@ -215,7 +220,7 @@
     });
   }
   $("add-break").onclick = () => { syncBreaks(); breaks.push({ start: "", minutes: 10, label: "" }); renderBreaks(); };
-  $("add-shift").onclick = () => { syncShifts(); shifts.push({ name: "", start: "" }); renderShifts(); };
+  $("add-shift").onclick = () => { syncShifts(); shifts.push({ name: "", start: "", end: "" }); renderShifts(); };
   document.addEventListener("click", e => {
     const db_ = e.target.closest("[data-del-break]"); if (db_) { syncBreaks(); breaks.splice(+db_.dataset.delBreak, 1); renderBreaks(); }
     const ds = e.target.closest("[data-del-shift]"); if (ds) { syncShifts(); shifts.splice(+ds.dataset.delShift, 1); renderShifts(); }
@@ -228,7 +233,10 @@
   };
   $("save-shifts").onclick = () => {
     syncShifts();
-    for (const s of shifts) { if (!s.name || !validHHMM(s.start)) return alert(`Each shift needs a name and HH:MM start.`); }
+    for (const s of shifts) {
+      if (!s.name || !validHHMM(s.start) || !validHHMM(s.end))
+        return alert(`Each shift needs a name plus HH:MM start and end (a window may wrap midnight, e.g. 22:00-06:00).`);
+    }
     send("/api/admin/schedule", { shifts });
   };
 
@@ -293,7 +301,10 @@
     else if ((b = e.target.closest("[data-edit-product]"))) editProduct(JSON.parse(b.dataset.editProduct.replace(/&#39;/g, "'")));
     else if ((b = e.target.closest("[data-toggle-product]"))) send("/api/admin/product", { op: b.dataset.op, id: +b.dataset.toggleProduct });
     else if ((b = e.target.closest("[data-edit-initials]"))) editInitials(JSON.parse(b.dataset.editInitials.replace(/&#39;/g, "'")));
-    else if ((b = e.target.closest("[data-toggle-initials]"))) send("/api/admin/initials", { op: b.dataset.op, id: +b.dataset.toggleInitials });
+    else if ((b = e.target.closest("[data-delete-initials]"))) {
+      if (confirm(`Delete "${b.dataset.ini}" from the roster? Past log entries keep their initials either way.`))
+        send("/api/admin/initials", { op: "delete", id: +b.dataset.deleteInitials });
+    }
     else if ((b = e.target.closest("[data-rename-bay]"))) promptModal("Rename bay", "Name", b.dataset.name,
       v => send("/api/admin/bay", { op: "rename", id: +b.dataset.renameBay, name: v }));
     else if ((b = e.target.closest("[data-col-bay]"))) promptModal("Top-row column", "Column number", b.dataset.col,

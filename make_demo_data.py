@@ -71,7 +71,8 @@ BREAKS = [
     {"start": "12:00", "minutes": 30, "label": "Lunch"},
     {"start": "14:30", "minutes": 15, "label": "Afternoon break"},
 ]
-SHIFTS = [{"name": "Day", "start": "06:00"}, {"name": "Evening", "start": "14:30"}]
+SHIFTS = [{"name": "Day", "start": "06:00", "end": "14:30"},
+          {"name": "Evening", "start": "14:30", "end": "22:30"}]
 OPERATING = {d: [["06:00", "22:30"]] for d in ("mon", "tue", "wed", "thu", "fri")}
 OPERATING.update({"sat": [], "sun": []})
 
@@ -221,11 +222,7 @@ def _simulate_day(sim: Sim, day, is_today: bool, now: datetime):
         sim.maybe_delay(bay, wo, pn, start, end)
 
         roll = RNG.random()
-        if roll < 0.12:                                   # scrap
-            sim.emit(end, "SCRAP", work_order=wo, product_number=pn,
-                     initials=RNG.choice(ROSTER)[0])
-            sim.release(bay, end)
-        elif roll < 0.40:                                 # two-step via queue
+        if roll < 0.35:                                   # two-step via queue
             sim.emit(end, "COMPLETE_BAY", bay_id=bay, work_order=wo,
                      product_number=pn, initials=RNG.choice(ROSTER)[0])
             sim.release(bay, end)

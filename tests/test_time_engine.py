@@ -144,13 +144,58 @@ def test_queue_time():
     conn.close()
 
 
+def test_shift_windows():
+    print("== shift start/end windows (incl. midnight wrap) ==")
+    s = Schedule(None, [], [{"name": "Day",     "start": "06:00", "end": "14:00"},
+                            {"name": "Evening", "start": "14:00", "end": "22:00"},
+                            {"name": "Night",   "start": "22:00", "end": "06:00"}])
+    check("07:00 -> Day", float(s.shift_for(T("07:00")) == "Day"), 1.0)
+    check("14:00 boundary -> Evening", float(s.shift_for(T("14:00")) == "Evening"), 1.0)
+    check("23:00 -> Night", float(s.shift_for(T("23:00")) == "Night"), 1.0)
+    check("02:00 wraps -> Night", float(s.shift_for(T("02:00")) == "Night"), 1.0)
+
+
+def test_multi_bay_parallel_journey():
+    print("== one unit: parallel start in 2 bays, mate, then 2 more bays (4 total) ==")
+    conn = fresh_conn()
+    b1, b2, b3, b4 = bay(conn, 1), bay(conn, 2), bay(conn, 3), bay(conn, 4)
+    # Two halves assembled simultaneously in two bays...
+    events.append(conn, "START", ts=f"{DAY} 08:00:00", bay_id=b1, work_order="M",
+                  product_number="P", component_label="Half A")
+    events.append(conn, "START", ts=f"{DAY} 08:00:00", bay_id=b2, work_order="M",
+                  product_number="P", component_label="Half B")
+    # ...mated into one unit (continues in bay 1, bay 2 frees up)...
+    events.append(conn, "MATE", ts=f"{DAY} 10:00:00", bay_id=b1, target_bay_id=b2,
+                  work_order="M")
+    # ...then travels through two more bays before completing (4 bays total).
+    events.append(conn, "MOVE", ts=f"{DAY} 11:00:00", bay_id=b1, target_bay_id=b3,
+                  work_order="M", product_number="P")
+    events.append(conn, "MOVE", ts=f"{DAY} 12:00:00", bay_id=b3, target_bay_id=b4,
+                  work_order="M", product_number="P")
+    events.append(conn, "UNIT_COMPLETE", ts=f"{DAY} 13:00:00", work_order="M")
+
+    r = state.replay(conn)
+    u = r.units["M"]
+    check("visited 4 distinct bays", float(len(set(u.bays_visited))), 4.0)
+    check("unit was mated", float(u.mated), 1.0)
+    check("journey closed as complete", float(u.outcome == "complete"), 1.0)
+    check("no bay still occupied", float(len(u.occupied_bays)), 0.0)
+    d = unit_durs(conn, "M")
+    check("active = 300m union (parallel not double-counted)", d["active"] / 60, 300)
+    check("queue 0m (always in a bay)", d["queue"] / 60, 0)
+    check("cycle = 300m", d["cycle"] / 60, 300)
+    conn.close()
+
+
 def main():
     try:
         test_schedule_breaks_and_offhours()
         test_shift_attribution()
+        test_shift_windows()
         test_parallel_union()
         test_delay_partition_and_break()
         test_queue_time()
+        test_multi_bay_parallel_journey()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
     print("\n" + ("ALL TIME-ENGINE TESTS PASSED" if not _FAILS else f"FAILURES: {_FAILS}"))

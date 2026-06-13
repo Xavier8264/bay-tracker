@@ -39,10 +39,14 @@ Configuration shapes (all editable in /admin, all start empty -- Appendix C4):
                         applied every operating day. e.g.
                             [{"start":"11:30","minutes":30,"label":"Lunch"}]
 
-  shifts :              list of {"name":str, "start":"HH:MM"} cutoffs, sorted by
-                        time of day. The shift covering a timestamp is the one
-                        whose start is the latest start at or before it (wrapping
-                        past midnight). Empty => no shift attribution (None).
+  shifts :              list of {"name":str, "start":"HH:MM", "end":"HH:MM"}.
+                        A timestamp belongs to the shift whose [start, end)
+                        window contains it; a window with start > end wraps past
+                        midnight (e.g. 22:00-06:00). "end" is optional for
+                        backward compatibility: shifts saved without one fall
+                        back to the original cutoff rule (latest start at or
+                        before the time, wrapping). Empty list => no shift
+                        attribution (None).
 ----------------------------------------------------------------------------
 """
 
@@ -186,15 +190,34 @@ class Schedule:
         return (not self.is_off_hours(now)) and (self.active_break(now) is None)
 
     def shift_for(self, when: datetime) -> Optional[str]:
-        """Attribute a timestamp to a shift name using the configured cutoffs.
+        """Attribute a timestamp to a shift name.
 
-        Uses clean cutoffs only -- real-world handoff overlaps (a 2:00/2:30
-        changeover) intentionally don't affect attribution (spec section 4).
-        Returns None when no shifts are configured.
+        Shifts entered with an explicit end use window containment: the shift
+        whose [start, end) contains the time wins (start > end wraps past
+        midnight). Shifts without an end keep the original clean-cutoff rule.
+        Real-world handoff overlaps (a 2:00/2:30 changeover) intentionally
+        don't affect attribution (spec section 4). Returns None when no shifts
+        are configured.
         """
         if not self.shifts:
             return None
         mins = when.hour * 60 + when.minute
+
+        # First: explicit [start, end) windows (the normal case now that the
+        # admin form has both fields).
+        for s in self.shifts:
+            end = s.get("end")
+            if not end:
+                continue
+            lo, hi = _minutes_of_day(s.get("start", "00:00")), _minutes_of_day(end)
+            if lo == hi:
+                continue                       # zero-length window: never matches
+            inside = (lo <= mins < hi) if lo < hi else (mins >= lo or mins < hi)
+            if inside:
+                return s.get("name")
+
+        # Fallback: the original cutoff rule, for shifts saved before "end"
+        # existed (and for times in a gap between explicit windows).
         chosen = None
         for s in self.shifts:
             if _minutes_of_day(s.get("start", "00:00")) <= mins:

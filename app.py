@@ -288,8 +288,6 @@ def _dispatch_action(conn, name, p):
         return actions.clear_delay(conn, int(p["bay_id"]), p.get("initials"))
     if name == "unit_complete":
         return actions.unit_complete(conn, p.get("work_order"), p.get("initials"))
-    if name == "scrap":
-        return actions.scrap(conn, p.get("work_order"), p.get("initials"))
     raise ActionError("Unknown action.")
 
 
@@ -544,9 +542,12 @@ def _register_admin_routes(app):
             conn.execute("UPDATE initials_roster SET initials = ?, name = ? WHERE id = ?;",
                          ((p.get("initials") or "").strip(),
                           (p.get("name") or "").strip() or None, p["id"]))
-        elif op in ("retire", "activate"):
-            conn.execute("UPDATE initials_roster SET active = ? WHERE id = ?;",
-                         (0 if op == "retire" else 1, p["id"]))
+        elif op == "delete":
+            # Hard delete, by design: the roster is just an autocomplete list,
+            # and events snapshot the initials TEXT, so removing a roster row
+            # can never orphan or rewrite history. (Everything else in admin is
+            # soft-retired because reasons/divisions are referenced by id.)
+            conn.execute("DELETE FROM initials_roster WHERE id = ?;", (p["id"],))
         conn.commit()
         return jsonify({"ok": True})
 

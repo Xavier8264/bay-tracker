@@ -51,13 +51,14 @@
 
   <!-- Initials roster -->
   <div class="card"><h2>Initials roster</h2>
-    <p class="hint">The console autocompletes from this but always allows new initials.</p>
+    <p class="hint">The console autocompletes from this but always allows new initials.
+      Deleting a row only trims this list — past log entries keep their initials forever.</p>
     <div class="toolbar">
       <div class="col"><label>Initials</label><input id="ni-ini" maxlength="8" placeholder="JP"></div>
       <div class="col"><label>Name (optional)</label><input id="ni-name"></div>
       <button class="primary" id="add-initials">Add</button>
     </div>
-    <table><thead><tr><th>Initials</th><th>Name</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Initials</th><th>Name</th><th></th></tr></thead>
       <tbody id="initials"></tbody></table>
   </div>
 
@@ -88,10 +89,11 @@
     <div class="actions"><button id="add-break">+ Add break</button><button class="primary" id="save-breaks">Save breaks</button></div>
   </div>
 
-  <div class="card"><h2>Shifts (attribution cutoffs)</h2>
-    <p class="hint">Each run/delay is attributed to the shift its start time falls in. Clean cutoffs only.
-      <b>Confirm these.</b> (Spec examples: 06:00 / 14:00 / 22:00.)</p>
-    <table><thead><tr><th>Name</th><th>Starts (HH:MM)</th><th></th></tr></thead><tbody id="shifts"></tbody></table>
+  <div class="card"><h2>Shifts</h2>
+    <p class="hint">Each run/delay is attributed to the shift whose start–end window its start time falls in.
+      A window may wrap past midnight (e.g. 22:00–06:00). <b>Confirm these.</b>
+      (Examples: Day 06:00–14:00, Evening 14:00–22:00, Night 22:00–06:00.)</p>
+    <table><thead><tr><th>Name</th><th>Starts (HH:MM)</th><th>Ends (HH:MM)</th><th></th></tr></thead><tbody id="shifts"></tbody></table>
     <div class="actions"><button id="add-shift">+ Add shift</button><button class="primary" id="save-shifts">Save shifts</button></div>
   </div>
 

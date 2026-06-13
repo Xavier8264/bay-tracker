@@ -199,7 +199,8 @@ Open **`/admin`** and enter your real values:
 - **Divisions** and **Delay reasons** (each reason maps to a division + an in/out-of-control tag).
 - **Product numbers** (the known short list) and the **Initials roster**.
 - **Bays & layout** (rename bays; enable extra top-row bays for a 4×4 grid).
-- **Break schedule**, **Shifts** (attribution cutoffs), and the **Operating calendar**.
+- **Break schedule**, **Shifts** (each with a start and end time; a window may wrap past
+  midnight), and the **Operating calendar**.
   - Until you enter operating hours, the system counts **all** elapsed time (nothing freezes
     for off-hours). Once entered, breaks and off-hours become non-counting time.
 - **Behaviour/cost settings**: delay-takeover duration, stale-item thresholds, labor cost rate.
@@ -212,7 +213,7 @@ Open **`/admin`** and enter your real values:
 | URL | Who | What |
 |-----|-----|------|
 | `/dashboard` | TVs (kiosk) | Read-only live grid. `?division=<name>` makes it take over full-screen only for that division's delays. |
-| `/console` | Central PC | Click a bay to Start / Move / Complete / Mate / Flag-or-Clear delay / Unit-complete / Scrap. Initials are entered in each action's pop-up (pre-filled with the last used, autocompleted from the roster). Barcode-scanner friendly. |
+| `/console` | Central PC | Click a bay to Start / Move / Complete / Mate / Flag-or-Clear delay / Unit-complete. Initials are entered in each action's pop-up (pre-filled with the last used, autocompleted from the roster). Barcode-scanner friendly. |
 | `/stats` | Management (PIN) | Date-range filters, Pareto/utilization/cycle/throughput charts, cost estimates, the corrections workflow, and CSV/XLSX export. |
 | `/admin` | Management (PIN) | All configuration above. |
 
@@ -349,7 +350,7 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1 -Demo
 
 On first use this generates a **separate, disposable demo database**
 (`C:\BayTrackerData_demo`) with three weeks of plausible history — runs, moves, delays with
-notes, completions, scraps, a configured schedule — plus a busy "right now" screen (several
+notes, completions, a configured schedule — plus a busy "right now" screen (several
 bays running, one delayed, units in queue). Every screen shows a **DEMO DATA** badge so the
 example data can never pass for the real thing.
 

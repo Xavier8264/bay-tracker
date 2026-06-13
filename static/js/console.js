@@ -152,7 +152,6 @@
       if (t.occupies_two) buttons.push(`<button data-act="mate">⚯ Mate (join 2 bays)</button>`);
     }
     buttons.push(`<button data-act="unit_complete">★ Unit complete</button>`);
-    buttons.push(`<button class="danger" data-act="scrap">✗ Scrap</button>`);
 
     openModal(`<h2>${BT.escapeHtml(t.name)} — ${BT.escapeHtml(t.work_order)}</h2>
       <div class="sub">${BT.escapeHtml(t.product_number || "")} · ${st}${t.component_label ? " · " + BT.escapeHtml(t.component_label) : ""}</div>
@@ -175,9 +174,6 @@
     if (act === "unit_complete") return confirmModal("Unit complete",
       `Mark work order <b>${BT.escapeHtml(t.work_order)}</b> as fully complete? This ends its journey.`,
       (btn, ini) => doAction({ action: "unit_complete", work_order: t.work_order, initials: ini }, btn));
-    if (act === "scrap") return confirmModal("Scrap unit",
-      `Scrap work order <b>${BT.escapeHtml(t.work_order)}</b>? This is terminal.`,
-      (btn, ini) => doAction({ action: "scrap", work_order: t.work_order, initials: ini }, btn), true);
   }
 
   // ---- Start ----

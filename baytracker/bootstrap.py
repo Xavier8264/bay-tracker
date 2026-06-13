@@ -47,7 +47,7 @@ EMPTY_OPERATIONAL_DEFAULTS = {
     "pin_admin_hash": None,        # /admin PIN
     "break_schedule": [],          # list of {start:"HH:MM", minutes:int, label:str} -- user enters
     "operating_calendar": None,    # None => treat ALL time as counting until hours are entered
-    "shifts": [],                  # list of {name:str, start:"HH:MM"} cutoffs -- user enters
+    "shifts": [],                  # list of {name, start:"HH:MM", end:"HH:MM"} -- user enters
     "backup_network_path": None,   # where the scheduled DB backup copy goes
 }
 
