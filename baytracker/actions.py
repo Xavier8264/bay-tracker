@@ -119,20 +119,25 @@ def complete_bay(conn, bay_id, initials):
 
 
 def mate(conn, keep_bay_id, release_bay_id, initials):
-    """Join a work order's two parallel streams into one continuing unit."""
+    """Merge two occupied bays into one continuing unit.
+
+    The unit continues in ``keep_bay_id`` and ``release_bay_id`` frees up. When
+    both bays carry the SAME work order this simply joins the two parallel
+    halves. When they carry DIFFERENT work orders, the kept bay's work order is
+    the survivor and the released bay's unit is recorded as 'merged' (so it is
+    not left as dangling WIP) -- see state.replay's MATE handling.
+    """
     _bay(conn, keep_bay_id)
     _bay(conn, release_bay_id)
     who = _require(initials, "Initials")
     if keep_bay_id == release_bay_id:
-        raise ActionError("Mate needs two different bays.")
+        raise ActionError("Merge needs two different bays.")
 
     r = state.replay(conn)
     keep = r.bay_current.get(keep_bay_id)
     rel = r.bay_current.get(release_bay_id)
     if keep is None or rel is None:
-        raise ActionError("Both bays must be running to mate.")
-    if keep.work_order != rel.work_order:
-        raise ActionError("Those two bays are running different work orders.")
+        raise ActionError("Both bays must be occupied to merge.")
 
     row = events.append(conn, "MATE", bay_id=keep_bay_id, target_bay_id=release_bay_id,
                         work_order=keep.work_order, product_number=keep.product_number,

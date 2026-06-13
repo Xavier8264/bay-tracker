@@ -289,7 +289,8 @@ DATA_DICTIONARY = [
     ("Unit Journeys", "first_started_at / completed_at", "First START to terminal completion."),
     ("Unit Journeys", "bays_visited", "Order of bays the unit passed through, e.g. 3 -> 7 -> 5."),
     ("Unit Journeys", "delay_count", "Number of delays flagged across the whole journey."),
-    ("Unit Journeys", "outcome", "complete, scrap, or open (still in progress)."),
+    ("Unit Journeys", "outcome", "complete, merged (absorbed into another unit), open "
+        "(still in progress), or scrap (legacy logs only)."),
     ("Events", "(all columns)", "The raw append-only log -- the source of truth from which "
         "every other table is derived. Never edited; corrections are new CORRECTION rows."),
 ]

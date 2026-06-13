@@ -35,16 +35,14 @@
   const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸", DONE: "✔" };
   const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE" };
 
-  // The unit's elapsed (parallel-aware union) and, when the unit ran in two
-  // bays at once, its total (the summed bay-times). They tick while the bay is
-  // actively RUNNING and freeze once it is DONE/paused.
-  function timeRows(t, accruing) {
-    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, accruing));
-    const showTotal = (t.unit_total_seconds || 0) - (t.unit_elapsed_seconds || 0) >= 1;
-    const totalRow = showTotal
-      ? `<div class="tile-row"><span class="meta">total</span><span class="meta">${BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, accruing))}</span></div>`
-      : "";
-    return { elapsed, totalRow };
+  // Every occupied tile shows the unit's ELAPSED (linear wall-clock) and TOTAL
+  // (time taken up across every bay it has touched -- parallel bays summed).
+  // Both tick while the plant clock is counting and freeze on breaks/off-hours.
+  function elapsedTotalRows(t) {
+    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
+    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
+    return `<div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
+            <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div>`;
   }
 
   function tileHTML(t) {
@@ -62,25 +60,22 @@
     if (es === "DELAYED") {
       const d = t.delay || {};
       const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
-      const delayElapsed = BT.fmtElapsed(BT.liveElapsed(t));
+      const delayDur = BT.fmtElapsed(BT.liveElapsed(t));
       return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
         <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
         <div class="wo">${BT.escapeHtml(t.work_order)}</div>
         <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
         <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
-        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayElapsed}</span></div></div>`;
+        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayDur}</span></div>
+        ${elapsedTotalRows(t)}</div>`;
     }
 
     // RUNNING or DONE (work finished, part still in the bay, awaiting next step)
-    const accruing = es === "RUNNING";
-    const { elapsed, totalRow } = timeRows(t, accruing);
-    const label = t.status === "ON_BREAK" ? "paused" : (es === "DONE" ? "done — awaiting" : "active");
     return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
       <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
       <div class="wo">${BT.escapeHtml(t.work_order)}</div>
       <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-      <div class="tile-row"><span class="meta">${label}</span><span class="elapsed">${elapsed}</span></div>
-      ${totalRow}</div>`;
+      ${elapsedTotalRows(t)}</div>`;
   }
 
   function render(snap) {
@@ -152,9 +147,11 @@
     const st = effStatus(t);
     if (st === "IDLE") return startModal(t);
 
-    // Other bays holding the SAME unit -> available as merge targets.
+    // Any OTHER occupied bay can be a merge target (combine the two bays into
+    // one continuing unit). Same-work-order bays are the usual case (two halves
+    // of one unit); a different work order is allowed and confirmed in the modal.
     const mergeable = snap.tiles.filter(x => x.bay_id !== t.bay_id
-      && x.work_order && x.work_order === t.work_order && effStatus(x) !== "IDLE");
+      && x.work_order && effStatus(x) !== "IDLE");
 
     const buttons = [];
     if (st === "DELAYED") {
@@ -304,22 +301,31 @@
       initials: document.getElementById("f-initials").value.trim() }, e.target);
   }
 
-  // ---- Merge (join two bays holding the same unit into one continuing bay) ----
+  // ---- Merge (combine two occupied bays into one continuing bay) ----
   function mergeModal(t, mergeable) {
     if (!mergeable.length) return;
     // "Merge into bay X" => the unit continues in X; this bay (t) frees up.
     const opts = mergeable.map(b =>
-      `<option value="${b.bay_id}">${BT.escapeHtml(b.name)}${b.component_label ? " · " + BT.escapeHtml(b.component_label) : ""}</option>`).join("");
-    openModal(`<h2>Merge ${BT.escapeHtml(t.work_order)}</h2>
-      <div class="sub">Join the two halves into one continuing unit. The merged unit stays in the
-        target bay; <b>${BT.escapeHtml(t.name)}</b> frees up.</div>
+      `<option value="${b.bay_id}" data-wo="${BT.escapeHtml(b.work_order)}">${BT.escapeHtml(b.name)} — ${BT.escapeHtml(b.work_order)}${b.component_label ? " · " + BT.escapeHtml(b.component_label) : ""}</option>`).join("");
+    openModal(`<h2>Merge — ${BT.escapeHtml(t.name)}</h2>
+      <div class="sub">Combine into one continuing unit. The merged unit stays in the target bay;
+        <b>${BT.escapeHtml(t.name)}</b> (${BT.escapeHtml(t.work_order)}) frees up.</div>
       <label>Continue in (merge into) *</label><select id="f-target">${opts}</select>
+      <div class="hint" id="merge-note"></div>
       ${initialsField()}${errEl()}
       <div class="actions"><button id="cancel">Cancel</button>
         <button class="primary" id="go">⚯ Merge</button></div>`);
     document.getElementById("cancel").onclick = closeModal;
+    const sel = document.getElementById("f-target");
+    function note() {
+      const o = sel.options[sel.selectedIndex]; if (!o) return;
+      document.getElementById("merge-note").textContent = (o.dataset.wo === t.work_order)
+        ? "Same work order — joining the two halves of this unit."
+        : `Different work orders — the merged unit continues as ${o.dataset.wo}; ${t.work_order} ends here (merged).`;
+    }
+    sel.onchange = note; note();
     document.getElementById("go").onclick = (e) => doAction({ action: "mate",
-      keep_bay_id: parseInt(document.getElementById("f-target").value, 10),
+      keep_bay_id: parseInt(sel.value, 10),
       release_bay_id: t.bay_id,
       initials: enteredInitials() }, e.target);
   }

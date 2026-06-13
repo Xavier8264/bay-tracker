@@ -24,14 +24,13 @@
   // A bay's effective status (a bay on break still reflects its underlying run).
   function effStatus(t) { return t.status === "ON_BREAK" ? (t.paused_status || "IDLE") : t.status; }
 
-  // Unit elapsed (+ total when it ran in two bays at once). Ticks while RUNNING.
-  function timeRows(t, accruing) {
-    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, accruing));
-    const showTotal = (t.unit_total_seconds || 0) - (t.unit_elapsed_seconds || 0) >= 1;
-    const totalRow = showTotal
-      ? `<div class="tile-row"><span class="meta">total</span><span class="meta">${BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, accruing))}</span></div>`
-      : "";
-    return { elapsed, totalRow };
+  // Every occupied tile shows the unit's ELAPSED (linear wall-clock) and TOTAL
+  // (time taken up across every bay touched). Both tick while time is counting.
+  function elapsedTotalRows(t) {
+    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
+    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
+    return `<div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
+            <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div>`;
   }
 
   function tileHTML(t) {
@@ -51,26 +50,23 @@
     if (es === "DELAYED") {
       const d = t.delay || {};
       const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
-      const delayElapsed = BT.fmtElapsed(BT.liveElapsed(t));
+      const delayDur = BT.fmtElapsed(BT.liveElapsed(t));
       return `<div class="${cls} clickable" data-bay="${t.bay_id}">${twobay}
         <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
         <div class="wo">${BT.escapeHtml(t.work_order)}</div>
         <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
         <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
-        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayElapsed}</span></div>
+        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayDur}</span></div>
+        ${elapsedTotalRows(t)}
       </div>`;
     }
 
     // RUNNING or DONE (work finished, part still in the bay) — or ON_BREAK over either
-    const accruing = es === "RUNNING";
-    const { elapsed, totalRow } = timeRows(t, accruing);
-    const label = t.status === "ON_BREAK" ? "paused" : (es === "DONE" ? "done — awaiting" : "active");
     return `<div class="${cls} clickable" data-bay="${t.bay_id}">${twobay}
       <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
       <div class="wo">${BT.escapeHtml(t.work_order)}</div>
       <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-      <div class="tile-row"><span class="meta">${label}</span><span class="elapsed">${elapsed}</span></div>
-      ${totalRow}
+      ${elapsedTotalRows(t)}
     </div>`;
   }
 

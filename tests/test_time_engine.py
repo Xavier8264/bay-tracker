@@ -197,7 +197,9 @@ def test_complete_bay_keeps_part_in_bay():
     snap = state.live_snapshot(conn, now=T("11:00"))
     tile = next(t for t in snap["tiles"] if t["bay_id"] == b1)
     check("bay still occupied (not IDLE)", float(tile["status"] == "DONE"), 1.0)
-    check("DONE bay active time frozen at 30m", tile["unit_elapsed_seconds"] / 60.0, 30)
+    check("bay active time frozen at 30m", tile["elapsed_seconds"] / 60.0, 30)
+    check("unit elapsed (linear) 60m", tile["unit_elapsed_seconds"] / 60.0, 60)
+    check("unit total (occupancy, 1 bay) 60m", tile["unit_total_seconds"] / 60.0, 60)
     # Now finish the unit at 11:00; the 10:30->11:00 wait is queue, active stays 30.
     events.append(conn, "UNIT_COMPLETE", ts=f"{DAY} 11:00:00", work_order="D")
     d = unit_durs(conn, "D")
@@ -218,9 +220,24 @@ def test_merge_total_vs_elapsed():
     snap = state.live_snapshot(conn, now=T("11:30"))
     tile = next(t for t in snap["tiles"] if t["bay_id"] == b1)
     check("bay 2 freed after merge", float(any(t["bay_id"] == b2 and t["status"] == "IDLE" for t in snap["tiles"])), 1.0)
-    # elapsed = union 10:00->11:30 = 90m; total = bay1(90) + bay2(60) = 150m.
-    check("elapsed 90m (union)", tile["unit_elapsed_seconds"] / 60.0, 90)
-    check("total 150m (summed)", tile["unit_total_seconds"] / 60.0, 150)
+    # elapsed (linear) = 10:00->11:30 = 90m; total (occupancy) = bay1(90) + bay2(60) = 150m.
+    check("elapsed 90m (linear)", tile["unit_elapsed_seconds"] / 60.0, 90)
+    check("total 150m (summed bay occupancy)", tile["unit_total_seconds"] / 60.0, 150)
+    conn.close()
+
+
+def test_merge_different_work_orders():
+    print("== merging two different work orders: target survives, source 'merged' ==")
+    conn = fresh_conn()
+    b1, b2 = bay(conn, 1), bay(conn, 2)
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b1, work_order="A", product_number="P")
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b2, work_order="B", product_number="P")
+    # merge B (bay 2) into A (bay 1): A continues, B ends as 'merged'.
+    events.append(conn, "MATE", ts=f"{DAY} 11:00:00", bay_id=b1, target_bay_id=b2, work_order="A")
+    r = state.replay(conn)
+    check("A still open in bay 1", float(r.units["A"].is_open and b1 in r.units["A"].occupied_bays), 1.0)
+    check("B ended as 'merged'", float(r.units["B"].outcome == "merged"), 1.0)
+    check("B no longer open WIP", float(not r.units["B"].is_open), 1.0)
     conn.close()
 
 
@@ -235,6 +252,7 @@ def main():
         test_multi_bay_parallel_journey()
         test_complete_bay_keeps_part_in_bay()
         test_merge_total_vs_elapsed()
+        test_merge_different_work_orders()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
     print("\n" + ("ALL TIME-ENGINE TESTS PASSED" if not _FAILS else f"FAILURES: {_FAILS}"))

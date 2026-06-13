@@ -297,11 +297,22 @@ def replay(conn) -> ReplayResult:
         elif etype == "MATE":
             releasing = r["target_bay_id"]
             rel_run = result.bay_current.get(releasing)
+            rel_wo = rel_run.work_order if rel_run else None
             if rel_run:
                 close_run(rel_run, when, "MATE", r["initials"])
             u = result.units.get(wo)
             if u:
                 u.mated = True
+            # If the released bay held a DIFFERENT work order, that unit has
+            # been absorbed into this one. End its journey as 'merged' so it
+            # isn't left as perpetual open WIP (it keeps its real recorded
+            # bay-time and delays; it just doesn't count as completed output).
+            if rel_wo and rel_wo != wo:
+                ru = result.units.get(rel_wo)
+                if ru and ru.is_open and not ru.occupied_bays:
+                    ru.completed = when
+                    ru.outcome = "merged"
+                    ru.mated = True
 
         elif etype == "DELAY_START":
             run = result.bay_current.get(bay)
@@ -396,23 +407,27 @@ def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     return {"active": active, "delay": delay, "queue": queue, "cycle": cycle}
 
 
-def unit_live_active(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
-                     now: datetime) -> Tuple[float, float]:
-    """Live (open-unit) active time as (elapsed, total) counted SECONDS.
+def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
+                    now: datetime) -> Tuple[float, float]:
+    """Return (elapsed, total) counted SECONDS for a unit, live.
 
-    * elapsed = counted UNION across the unit's bays (wall-clock-ish progress).
-    * total   = counted SUM across the unit's bays (parallel work added up).
-    They are equal for a unit that never ran in two bays at once; after two
-    parallel halves merge, total stays ahead of elapsed by the overlap.
+    * elapsed = LINEAR time: counted wall-clock from the unit's first start to
+      ``now`` (or completion). It does not double-count parallel work.
+    * total   = the time the unit has TAKEN UP across every bay it has touched,
+      i.e. the SUM of each bay's occupied time. Two bays held in parallel add
+      together here.
+    They are equal for a unit that was only ever in one bay at a time; once it
+    runs in two bays at once, total pulls ahead of elapsed by the overlap.
     """
-    unit_runs = [r for r in runs if r.work_order == unit.work_order]
-    running_all: List[Interval] = []
+    end = unit.completed or now
     total = 0.0
-    for r in unit_runs:
-        ivs = r.running_intervals(now)
-        running_all += ivs
-        total += counted_over(sched, ivs)
-    return counted_over(sched, running_all), total
+    for r in runs:
+        if r.work_order != unit.work_order:
+            continue
+        s, e = r.occupied_interval(end)
+        total += sched.counted_seconds(s, e)
+    elapsed = sched.counted_seconds(unit.first_started, end)
+    return elapsed, total
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +520,7 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
             u = result.units.get(run.work_order)
             tile["occupies_two"] = bool(u and len(u.occupied_bays) >= 2)
             if u is not None:
-                elapsed_u, total_u = unit_live_active(sched, u, result.runs, now)
+                elapsed_u, total_u = unit_live_times(sched, u, result.runs, now)
                 tile["unit_elapsed_seconds"] = int(elapsed_u)
                 tile["unit_total_seconds"] = int(total_u)
 
