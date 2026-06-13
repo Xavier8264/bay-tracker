@@ -107,6 +107,24 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px;
   grid-auto-rows: 1fr;
 }
 
+/* ---- kiosk mode (dashboard only): fill the ENTIRE screen ----------------
+   The body becomes a fixed viewport-height column; the grid wrapper takes
+   every pixel left over after the mode banner, and the rows split that
+   height equally (dashboard.js sets grid-template-rows). No scrollbars,
+   no dead space under the tiles -- the TV is all grid. */
+body.kiosk {
+  height: 100vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+@supports (height: 100dvh) { body.kiosk { height: 100dvh; } }
+body.kiosk .grid-wrap {
+  flex: 1; min-height: 0;          /* min-height:0 lets the grid shrink to fit */
+  display: flex;
+}
+body.kiosk .bay-grid { flex: 1; min-height: 0; }
+body.kiosk .tile { min-height: 0; }  /* row height comes from the screen, not the tile */
+
 .tile {
   position: relative;
   border-radius: var(--radius);

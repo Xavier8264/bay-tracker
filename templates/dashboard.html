@@ -2,6 +2,8 @@
 {% block title %}Bay Dashboard{% endblock %}
 
 {# The dashboard is a kiosk view: no nav bar, full-screen, glanceable. #}
+{# body.kiosk makes the grid stretch to fill the whole screen (see app.css). #}
+{% block bodyclass %}kiosk{% endblock %}
 {% block topbar %}{% endblock %}
 
 {% block content %}

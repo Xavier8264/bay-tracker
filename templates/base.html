@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block bodyclass %}{% endblock %}">
   <!-- Shown by common.js when the live connection drops (so a frozen TV is obvious). -->
   <div id="offline-banner"></div>
 

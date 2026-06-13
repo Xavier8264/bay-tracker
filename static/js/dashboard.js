@@ -65,6 +65,12 @@
     const tiles = snap.tiles || [];
     const standard = tiles.filter(t => !t.is_extra);
     const extras = tiles.filter(t => t.is_extra);
+
+    // Explicit equal-height rows so the grid fills the whole screen (the
+    // kiosk CSS stretches the grid to viewport height; 1fr rows then split
+    // that height evenly). Rows are derived from what is actually rendered.
+    const rows = (layout.extras_enabled ? 1 : 0) + Math.max(1, Math.ceil(standard.length / cols));
+    grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
     let html = "";
 
     if (layout.extras_enabled) {
