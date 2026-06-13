@@ -29,8 +29,19 @@
   async function send(url, body) {
     const r = await BT.post(url, body);
     if (!r.ok) alert((r.data && r.data.error) || "Save failed.");
+    else toast("Saved ✓");
     await load();
     return r.ok;
+  }
+
+  // Brief "Saved ✓" confirmation in the corner after a successful save.
+  let _toastTimer = null;
+  function toast(msg) {
+    const el = $("toast"); if (!el) return;
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
   }
 
   function renderAll() {
@@ -287,7 +298,7 @@
     else if (a !== "") await BT.post("/api/admin/pin", { area: "admin", pin: a });
     $("pin-stats").value = ""; $("pin-admin").value = "";
     $("pin-stats-clear").checked = false; $("pin-admin-clear").checked = false;
-    alert("PINs saved."); load();
+    toast("PINs saved ✓"); load();
   };
   $("lock-now").onclick = () => BT.post("/lock", {}).then(() => location.href = "/admin");
 

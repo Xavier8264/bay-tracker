@@ -41,8 +41,11 @@
   function elapsedTotalRows(t) {
     const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
     const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
-    return `<div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
-            <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div>`;
+    // .times is bottom-anchored (CSS margin-top:auto) so elapsed/total line up
+    // horizontally across every tile, however many lines sit above them.
+    return `<div class="times">
+      <div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
+      <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div></div>`;
   }
 
   function tileHTML(t) {

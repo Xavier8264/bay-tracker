@@ -190,6 +190,12 @@ body.fillscreen .tile { min-height: 0; }
 }
 .tile-row { display:flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 
+/* The elapsed/total block sits at the bottom of every tile so the time
+   labels align horizontally across the grid, regardless of how many content
+   lines (work order, product, reason) appear above them. */
+.tile .times { margin-top: auto; }
+.tile .times .tile-row { align-items: baseline; }
+
 /* clickable console tiles */
 .tile.clickable { cursor: pointer; transition: transform .05s ease; }
 .tile.clickable:hover { border-color: rgba(255,255,255,.55); }
@@ -282,6 +288,17 @@ canvas { max-width: 100%; }
 
 .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: flex-end; }
 .toolbar .col { min-width: 150px; flex: 0 1 auto; }
+
+/* save confirmation toast (admin) */
+.toast {
+  position: fixed; bottom: 22px; right: 22px; z-index: 9999;
+  background: var(--good); color: #04210f; font-weight: 700;
+  padding: 11px 18px; border-radius: 10px; font-size: 15px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.35);
+  opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
 
 /* unlock page */
 .unlock-wrap { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
