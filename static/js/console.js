@@ -3,7 +3,8 @@
 
    Mirrors the dashboard grid, but every tile is clickable. The common path is
    optimized for the fewest clicks/keystrokes:
-     * "Your initials" is set once and pre-fills every action.
+     * Initials are entered in each action's pop-up (pre-filled with the last
+       initials used on this PC, with autocomplete from the admin roster).
      * Product entry is type-to-filter, matching consecutive digits ANYWHERE in
        the number (so the last 3 digits find it), with an "Other" free-text path.
      * Barcode scanners just type into the focused field + Enter.
@@ -14,11 +15,13 @@
   let cfg = { reasons: [], products: [], initials: [], bays: [],
               layout: { grid_cols: 4, standard_rows: 3, extras_enabled: false } };
 
-  const myInitialsEl = document.getElementById("my-initials");
-  myInitialsEl.value = localStorage.getItem("bt_initials") || "";
-  myInitialsEl.addEventListener("input", () =>
-    localStorage.setItem("bt_initials", myInitialsEl.value.trim()));
-  const myInitials = () => myInitialsEl.value.trim();
+  // Last-used initials, remembered per browser so the pop-up field is
+  // pre-filled but always visible and editable for each individual action.
+  const myInitials = () => (localStorage.getItem("bt_initials") || "").trim();
+  function rememberInitials(v) {
+    v = (v || "").trim();
+    if (v) localStorage.setItem("bt_initials", v);
+  }
 
   async function loadConfig() {
     const r = await BT.get("/api/config");
@@ -67,6 +70,15 @@
     const tiles = snap.tiles || [];
     const standard = tiles.filter(t => !t.is_extra);
     const extras = tiles.filter(t => t.is_extra);
+
+    // Equal-height rows so the bays stretch to fill the screen (body.fillscreen
+    // in app.css gives the grid the full remaining viewport height).
+    const rows = (cfg.layout.extras_enabled ? 1 : 0) + Math.max(1, Math.ceil(standard.length / cols));
+    grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+    // demo-mode badge (the served DB is the demo one, not the live log)
+    const dt = document.getElementById("demo-tag");
+    if (dt) dt.classList.toggle("show", !!snap.demo_mode);
     let html = "";
     if (cfg.layout.extras_enabled) {
       for (let c = 1; c <= cols; c++) {
@@ -103,16 +115,23 @@
   function closeModal() { backdrop.classList.remove("show"); modal.innerHTML = ""; }
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(); });
   function initialsField(id = "f-initials") {
+    // Autocomplete from the admin roster, but free typing is always allowed.
+    const opts = (cfg.initials || []).map(i => `<option value="${BT.escapeHtml(i)}">`).join("");
     return `<label>Initials *</label><input id="${id}" value="${BT.escapeHtml(myInitials())}"
-            maxlength="8" autocomplete="off">`;
+            maxlength="8" autocomplete="off" list="initials-roster">
+            <datalist id="initials-roster">${opts}</datalist>`;
   }
+  const enteredInitials = () => {
+    const el = document.getElementById("f-initials");
+    return el ? el.value.trim() : "";
+  };
   function errEl() { return `<div class="error-text" id="err"></div>`; }
   function setErr(msg) { const e = document.getElementById("err"); if (e) e.textContent = msg || ""; }
 
   async function doAction(payload, btn) {
     if (btn) btn.disabled = true;
     const r = await BT.post("/api/action", payload);
-    if (r.ok) { closeModal(); }
+    if (r.ok) { rememberInitials(payload.initials); closeModal(); }
     else { setErr((r.data && r.data.error) || "Something went wrong."); if (btn) btn.disabled = false; }
   }
 
@@ -144,17 +163,21 @@
   }
 
   function routeAction(act, t) {
-    if (act === "clear") return doAction({ action: "clear_delay", bay_id: t.bay_id, initials: myInitials() });
+    if (act === "clear") return confirmModal("Clear delay",
+      `Clear the delay on <b>${BT.escapeHtml(t.name)}</b> (${BT.escapeHtml(t.work_order)})? The bay returns to running.`,
+      (btn, ini) => doAction({ action: "clear_delay", bay_id: t.bay_id, initials: ini }, btn));
     if (act === "delay") return delayModal(t);
     if (act === "move") return moveModal(t);
-    if (act === "complete") return doAction({ action: "complete_bay", bay_id: t.bay_id, initials: myInitials() });
+    if (act === "complete") return confirmModal("Complete at bay",
+      `Complete <b>${BT.escapeHtml(t.work_order)}</b> at ${BT.escapeHtml(t.name)}? It moves to the WIP/queue pool and the bay frees up.`,
+      (btn, ini) => doAction({ action: "complete_bay", bay_id: t.bay_id, initials: ini }, btn));
     if (act === "mate") return mateModal(t);
     if (act === "unit_complete") return confirmModal("Unit complete",
       `Mark work order <b>${BT.escapeHtml(t.work_order)}</b> as fully complete? This ends its journey.`,
-      () => doAction({ action: "unit_complete", work_order: t.work_order, initials: myInitials() }));
+      (btn, ini) => doAction({ action: "unit_complete", work_order: t.work_order, initials: ini }, btn));
     if (act === "scrap") return confirmModal("Scrap unit",
       `Scrap work order <b>${BT.escapeHtml(t.work_order)}</b>? This is terminal.`,
-      () => doAction({ action: "scrap", work_order: t.work_order, initials: myInitials() }), true);
+      (btn, ini) => doAction({ action: "scrap", work_order: t.work_order, initials: ini }, btn), true);
   }
 
   // ---- Start ----
@@ -304,13 +327,16 @@
       initials: document.getElementById("f-initials").value.trim() }, e.target);
   }
 
-  // ---- confirm (terminal actions) ----
+  // ---- confirm (actions that need no other input). Initials are entered
+  // here, in the pop-up, like every other action. onYes(btn, initials).
   function confirmModal(title, html, onYes, danger) {
-    openModal(`<h2>${title}</h2><div class="sub">${html}</div>${errEl()}
+    openModal(`<h2>${title}</h2><div class="sub">${html}</div>${initialsField()}${errEl()}
       <div class="actions"><button id="cancel">Cancel</button>
         <button class="${danger ? "danger" : "primary"}" id="yes">Confirm</button></div>`);
     document.getElementById("cancel").onclick = closeModal;
-    document.getElementById("yes").onclick = (e) => onYes(e.target);
+    const ini = document.getElementById("f-initials");
+    if (!ini.value) ini.focus();
+    document.getElementById("yes").onclick = (e) => onYes(e.target, enteredInitials());
   }
 
   // ---- wire up clicks -----------------------------------------------------

@@ -125,6 +125,34 @@ body.kiosk .grid-wrap {
 body.kiosk .bay-grid { flex: 1; min-height: 0; }
 body.kiosk .tile { min-height: 0; }  /* row height comes from the screen, not the tile */
 
+/* ---- fillscreen mode (console): same idea but the nav bar stays -----------
+   Everything under the topbar + mode banner is grid; the bays grow taller to
+   use the whole remaining height. The WIP/queue card (when present) keeps its
+   natural height at the bottom and the grid shrinks to make room. */
+body.fillscreen {
+  height: 100vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+@supports (height: 100dvh) { body.fillscreen { height: 100dvh; } }
+body.fillscreen .grid-wrap {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+body.fillscreen .bay-grid { flex: 1; min-height: 0; }
+body.fillscreen .tile { min-height: 0; }
+body.fillscreen #wip-card { flex: 0 0 auto; max-height: 28vh; overflow: auto; }
+
+/* ---- demo-mode badge: shown whenever the served database is the demo one,
+   so example data can never be mistaken for (or logged into) the real log. */
+.demo-tag {
+  display: none;
+  font-size: 12px; font-weight: 800; letter-spacing: 1px;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--warn); color: #1a1205;
+}
+.demo-tag.show { display: inline-block; }
+
 .tile {
   position: relative;
   border-radius: var(--radius);

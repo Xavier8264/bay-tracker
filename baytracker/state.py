@@ -487,6 +487,9 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
 
     return {
         "server_time": _fmt(now),
+        # True only in a database created by make_demo_data.py. The UI shows a
+        # "DEMO DATA" badge so example data can never pass for the real log.
+        "demo_mode": bool(db.get_setting(conn, "demo_mode", False)),
         "is_counting": counting,
         "off_hours": off_hours,
         "on_break": ({"label": on_break["label"], "ends_at": _fmt(on_break["ends_at"])}

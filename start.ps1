@@ -24,12 +24,17 @@
         .\start.ps1                  # normal launch on port 5000
         .\start.ps1 -Force           # kill whatever holds port 5000, then launch
         .\start.ps1 -Port 8080       # serve on a different port
+        .\start.ps1 -Demo            # serve the DISPOSABLE demo database instead
+                                     # (generates it on first use; the real log is
+                                     #  never opened -- restart without -Demo to
+                                     #  return to live data)
 #>
 param(
     [int]$Port = 5000,
     [int]$Threads = 32,
     [string]$DataDir = "",     # empty => machine/user BAYTRACKER_DATA, else C:\BayTrackerData
-    [switch]$Force             # take the port over if another process holds it
+    [switch]$Force,            # take the port over if another process holds it
+    [switch]$Demo              # serve the demo database (separate folder, "DEMO DATA" badge)
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,7 +42,15 @@ $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $RepoDir
 
 # --- 1. Resolve the data folder (parameter > existing env var > default) -----
-if (-not $DataDir) {
+if ($Demo) {
+    # Demo mode serves a physically separate, disposable database. The real
+    # data folder is not opened at all. make_demo_data.py refuses to write
+    # anywhere that isn't a *_demo folder, so this cannot collide with the log.
+    if ($DataDir -and -not $DataDir.ToLower().EndsWith("_demo")) {
+        throw "-Demo requires a data folder ending in '_demo' (got: $DataDir)."
+    }
+    if (-not $DataDir) { $DataDir = "$env:SystemDrive\BayTrackerData_demo" }
+} elseif (-not $DataDir) {
     foreach ($scope in @("Process", "User", "Machine")) {
         $v = [Environment]::GetEnvironmentVariable("BAYTRACKER_DATA", $scope)
         if ($v) { $DataDir = $v.Trim('"').Trim(); break }
@@ -80,6 +93,13 @@ if ($listener) {
     }
 }
 
+# --- 3b. Demo mode: generate the example dataset on first use -------------------
+if ($Demo -and -not (Test-Path (Join-Path $DataDir "baytracker.db"))) {
+    Write-Host "Generating demo dataset (first use)..." -ForegroundColor Yellow
+    & $venvPy (Join-Path $RepoDir "make_demo_data.py") --data-dir $DataDir
+    if ($LASTEXITCODE -ne 0) { throw "Demo data generation failed (see message above)." }
+}
+
 # --- 4. Launch -------------------------------------------------------------------
 $env:BAYTRACKER_DATA = $DataDir
 $ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -88,6 +108,10 @@ $ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 if (-not $ipv4) { $ipv4 = "<this-pc-ip>" }
 
 Write-Host "=== Bay Tracking server ===" -ForegroundColor Cyan
+if ($Demo) {
+    Write-Host ">>> DEMO MODE: serving EXAMPLE data from $DataDir <<<" -ForegroundColor Yellow
+    Write-Host ">>> The real log is untouched. Restart without -Demo to go live. <<<" -ForegroundColor Yellow
+}
 Write-Host "Code:  $RepoDir"
 Write-Host "Data:  $DataDir"
 Write-Host "URLs:  http://${ipv4}:$Port/dashboard   /console   /stats   /admin" -ForegroundColor Green

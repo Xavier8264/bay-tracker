@@ -71,6 +71,10 @@
     // that height evenly). Rows are derived from what is actually rendered.
     const rows = (layout.extras_enabled ? 1 : 0) + Math.max(1, Math.ceil(standard.length / cols));
     grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+    // demo-mode badge (the served DB is the demo one, not the live log)
+    const dt = document.getElementById("demo-tag");
+    if (dt) dt.classList.toggle("show", !!snap.demo_mode);
     let html = "";
 
     if (layout.extras_enabled) {

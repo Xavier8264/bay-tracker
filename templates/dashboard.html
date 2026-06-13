@@ -14,10 +14,11 @@
 </div>
 
 <!-- tiny corner status: connection + clock + optional division filter -->
-<div style="position:fixed;bottom:10px;left:14px;font-size:13px;color:var(--muted);">
+<div style="position:fixed;bottom:10px;left:14px;font-size:13px;color:var(--muted);z-index:100;">
   <span id="clock"></span>
   {% if division %}<span> · Filter: <b>{{ division }}</b></span>{% endif %}
   <span id="dash-conn"></span>
+  <span id="demo-tag" class="demo-tag" style="margin-left:8px;">DEMO DATA</span>
 </div>
 
 <!-- full-screen delay takeover -->

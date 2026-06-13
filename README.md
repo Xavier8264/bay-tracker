@@ -40,7 +40,7 @@ port that every other machine (TVs, the logging PC, your laptop) can reach in a 
 ```powershell
 # Clone to a plain local path (a OneDrive/Dropbox-synced folder is fine for the CODE,
 # but the DATABASE must not live in one -- see step 2).
-git clone https://github.com/Xavier8264/bay-tracker.git C:\BayTracking
+git clone https://github.com/Xavier8264/Bay-Tracking-Display.git C:\BayTracking
 cd C:\BayTracking
 ```
 
@@ -212,7 +212,7 @@ Open **`/admin`** and enter your real values:
 | URL | Who | What |
 |-----|-----|------|
 | `/dashboard` | TVs (kiosk) | Read-only live grid. `?division=<name>` makes it take over full-screen only for that division's delays. |
-| `/console` | Central PC | Click a bay to Start / Move / Complete / Mate / Flag-or-Clear delay / Unit-complete / Scrap. Barcode-scanner friendly. |
+| `/console` | Central PC | Click a bay to Start / Move / Complete / Mate / Flag-or-Clear delay / Unit-complete / Scrap. Initials are entered in each action's pop-up (pre-filled with the last used, autocompleted from the roster). Barcode-scanner friendly. |
 | `/stats` | Management (PIN) | Date-range filters, Pareto/utilization/cycle/throughput charts, cost estimates, the corrections workflow, and CSV/XLSX export. |
 | `/admin` | Management (PIN) | All configuration above. |
 
@@ -282,6 +282,45 @@ and (8) **automatically rolls back** to the previous version if the health check
 
 ---
 
+## Day-to-day workflow: edit on your laptop, deploy on the floor PC
+
+There is **one** GitHub repository — `Xavier8264/Bay-Tracking-Display` — and it is the only
+path code takes between machines. Never edit code directly on the floor PC, and never copy
+files between machines by hand (that's how the two copies stop matching).
+
+**On your laptop** (any clone of the repo):
+
+```powershell
+# ...edit code, test locally on the DEV port so you can't collide with production...
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -Port 5001 -DataDir C:\BayTrackerData_dev
+
+git add -A
+git commit -m "Describe the change"
+git push origin main
+
+# When the change is ready for the floor, tag it as a release:
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+**On the floor PC** (the permanent server):
+
+```powershell
+cd C:\BayTracking
+# The safe way -- backs up the DB first, health-checks, auto-rolls-back on failure:
+powershell -ExecutionPolicy Bypass -File .\update.ps1 -Tag v1.2.0
+
+# The quick way (small, low-risk changes): pull and restart.
+git pull origin main
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -Force
+```
+
+The database lives outside the repo (`C:\BayTrackerData`), so neither `git pull` nor
+`update.ps1` can ever touch the accumulated log — updating code and preserving data are
+physically independent.
+
+---
+
 ## Exports
 
 The Stats page produces four purpose-shaped tables (one row = one real thing), respecting the
@@ -300,12 +339,40 @@ blank end times and blank durations — never a fabricated value.
 
 ---
 
+## Demo mode (pitch with example data, zero risk to the real log)
+
+To show the system to management with realistic-looking data:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -Demo
+```
+
+On first use this generates a **separate, disposable demo database**
+(`C:\BayTrackerData_demo`) with three weeks of plausible history — runs, moves, delays with
+notes, completions, scraps, a configured schedule — plus a busy "right now" screen (several
+bays running, one delayed, units in queue). Every screen shows a **DEMO DATA** badge so the
+example data can never pass for the real thing.
+
+- **Back to live:** restart without `-Demo` (`.\start.ps1 -Force`). That's it — the server
+  simply points back at the real database, which was **never opened** during the demo.
+- **Delete the example data:** delete the `C:\BayTrackerData_demo` folder.
+- **Regenerate a fresh demo:** `venv\Scripts\python.exe make_demo_data.py --fresh`
+
+Why it's safe by construction: demo data lives in a physically different folder and file.
+The generator refuses to write anywhere that isn't a `*_demo` folder, refuses the live data
+folder outright, and refuses to touch any existing database that isn't itself marked as demo.
+Fabricated rows are never mixed into (and never deleted from) the real append-only log.
+
+---
+
 ## Data integrity (no fabricated data)
 
-The database starts empty of all operational records. The system never invents, estimates,
-randomizes, interpolates, or default-fills a value. Open records stay open. Stats show only real
-recorded data ("no data" where there is none). Cost is shown only if you enter a labor rate. The
-only auto-created rows are the empty structural bay slots and the mandatory "Other" reason.
+The **production** database starts empty of all operational records. The system never invents,
+estimates, randomizes, interpolates, or default-fills a value. Open records stay open. Stats
+show only real recorded data ("no data" where there is none). Cost is shown only if you enter a
+labor rate. The only auto-created rows are the empty structural bay slots and the mandatory
+"Other" reason. (Example data for pitching exists only in the separate demo database above,
+never in the real log.)
 
 ---
 
@@ -314,6 +381,7 @@ only auto-created rows are the empty structural bay slots and the mandatory "Oth
 ```
 app.py            WSGI app (app:app): routes, SSE, JSON API, PIN gate, /healthz
 init_db.py        Create + seed the DB (non-destructive)
+make_demo_data.py Build the separate, disposable DEMO database (start.ps1 -Demo)
 migrate.py        Forward-only, idempotent schema migrations
 backup_db.py      Consistent online backup of the DB
 setup.ps1         One-time install     update.ps1   Safe, reversible update
