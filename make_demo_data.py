@@ -222,50 +222,37 @@ def _simulate_day(sim: Sim, day, is_today: bool, now: datetime):
         sim.maybe_delay(bay, wo, pn, start, end)
 
         roll = RNG.random()
-        if roll < 0.35:                                   # two-step via queue
-            sim.emit(end, "COMPLETE_BAY", bay_id=bay, work_order=wo,
-                     product_number=pn, initials=RNG.choice(ROSTER)[0])
-            sim.release(bay, end)
-            q_end = end + timedelta(minutes=RNG.randint(20, 90))
-            bay2 = sim.grab_bay(q_end, exclude=(bay,))
-            if bay2 is None:
-                return
-            fin = min(q_end + timedelta(minutes=RNG.randint(45, 150)),
-                      day_end - timedelta(minutes=5))
-            if is_today and fin >= now:
-                sim.emit(q_end, "START", bay_id=bay2, work_order=wo,
+        if roll < 0.45:                                   # travels through 2-3 bays via MOVE
+            cur = bay
+            hops = RNG.randint(1, 2)
+            for h in range(hops):
+                hop_t = start + (end - start) * ((h + 1) / (hops + 1))
+                nxt = sim.grab_bay(hop_t, exclude=(cur,))
+                if nxt is None:
+                    break
+                sim.emit(hop_t, "MOVE", bay_id=cur, target_bay_id=nxt, work_order=wo,
                          product_number=pn, initials=RNG.choice(ROSTER)[0])
-                return
-            sim.emit(q_end, "START", bay_id=bay2, work_order=wo, product_number=pn,
-                     initials=RNG.choice(ROSTER)[0])
-            sim.emit(fin, "UNIT_COMPLETE", work_order=wo, product_number=pn,
-                     initials=RNG.choice(ROSTER)[0])
-            sim.release(bay2, fin)
-        elif roll < 0.55:                                 # move bays mid-run
-            mid = start + (end - start) * 0.5
-            bay2 = sim.grab_bay(mid, exclude=(bay,))
-            if bay2 is not None:
-                sim.emit(mid, "MOVE", bay_id=bay, target_bay_id=bay2, work_order=wo,
-                         product_number=pn, initials=RNG.choice(ROSTER)[0])
-                sim.release(bay, mid)
-                bay = bay2
+                sim.release(cur, hop_t)
+                cur = nxt
             sim.emit(end, "UNIT_COMPLETE", work_order=wo, product_number=pn,
                      initials=RNG.choice(ROSTER)[0])
-            sim.release(bay, end)
-        else:                                             # complete from the bay
+            sim.release(cur, end)
+        else:                                             # finished at the one bay
             sim.emit(end, "UNIT_COMPLETE", work_order=wo, product_number=pn,
                      initials=RNG.choice(ROSTER)[0])
             sim.release(bay, end)
 
 
 def _today_extras(sim: Sim, day, now: datetime):
-    """Make the live screen look mid-shift: several bays running, one delayed,
-    units in queue. Anchored to the afternoon of the most recent workday so the
-    demo looks busy no matter what time it is generated."""
+    """Make the live screen look mid-shift: several bays RUNNING, one DELAYED,
+    one DONE (work finished, part still in the bay), and one merged unit (two
+    parallel halves joined, now continuing in a single bay with total > elapsed).
+    Anchored to the afternoon of the most recent workday so it always looks busy.
+    None of these are released -- they stay open on the live board."""
     anchor = min(now, datetime(day.year, day.month, day.day, 15, 0))
 
-    # five bays currently RUNNING (open runs at different elapsed times)
-    for _ in range(5):
+    # four bays currently RUNNING (open runs at different elapsed times)
+    for _ in range(4):
         wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
         start = anchor - timedelta(minutes=RNG.randint(45, 280))
         bay = sim.grab_bay(start)
@@ -289,19 +276,32 @@ def _today_extras(sim: Sim, day, now: datetime):
                  note=RNG.choice(DELAY_NOTES[r["label"]]),
                  initials=RNG.choice(ROSTER)[0])
 
-    # two units waiting in the WIP/queue pool
-    for _ in range(2):
-        wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
-        start = anchor - timedelta(minutes=RNG.randint(180, 300))
-        bay = sim.grab_bay(start)
-        if bay is None:
-            continue
-        comp = start + timedelta(minutes=RNG.randint(60, 120))
+    # one bay DONE: work finished, the part still sits in the bay (amber).
+    wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
+    start = anchor - timedelta(minutes=RNG.randint(120, 200))
+    bay = sim.grab_bay(start)
+    if bay is not None:
         sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
                  initials=RNG.choice(ROSTER)[0])
-        sim.emit(comp, "COMPLETE_BAY", bay_id=bay, work_order=wo, product_number=pn,
-                 initials=RNG.choice(ROSTER)[0])
-        sim.release(bay, comp)
+        sim.emit(anchor - timedelta(minutes=RNG.randint(15, 45)), "COMPLETE_BAY",
+                 bay_id=bay, work_order=wo, product_number=pn, initials=RNG.choice(ROSTER)[0])
+
+    # one MERGED unit: two halves started in parallel, then joined into one bay.
+    # The continuing bay shows total > elapsed (the parallel time is summed).
+    wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
+    t0 = anchor - timedelta(minutes=RNG.randint(150, 210))
+    ba = sim.grab_bay(t0)
+    bb = sim.grab_bay(t0, exclude=(ba,)) if ba is not None else None
+    if ba is not None and bb is not None:
+        who = RNG.choice(ROSTER)[0]
+        sim.emit(t0, "START", bay_id=ba, work_order=wo, product_number=pn,
+                 component_label="Half A", initials=who)
+        sim.emit(t0, "START", bay_id=bb, work_order=wo, product_number=pn,
+                 component_label="Half B", initials=who)
+        mate_t = anchor - timedelta(minutes=RNG.randint(60, 90))
+        sim.emit(mate_t, "MATE", bay_id=ba, target_bay_id=bb, work_order=wo,
+                 product_number=pn, initials=RNG.choice(ROSTER)[0])
+        sim.release(bb, mate_t)   # bb frees; ba continues (stays open)
 
 
 # ---------------------------------------------------------------------------
@@ -379,13 +379,14 @@ def main() -> None:
         snap = state.live_snapshot(conn)
         stats = metrics.compute(conn, {})
         n_events = conn.execute("SELECT COUNT(*) AS n FROM events;").fetchone()["n"]
-        running = sum(1 for t in snap["tiles"] if t["status"] != "IDLE")
+        occupied = sum(1 for t in snap["tiles"] if t["status"] != "IDLE")
+        done = sum(1 for t in snap["tiles"] if t["status"] == "DONE")
     finally:
         conn.close()
 
     print(f"[demo] Demo database created: {db_path}")
     print(f"[demo] {n_events} events over {args.days} workdays · "
-          f"{running} bays occupied right now · {len(snap['queue'])} in queue · "
+          f"{occupied} bays occupied right now · {done} done/awaiting · "
           f"{snap['open_delays']} open delay(s)")
     print("[demo] Launch it:      powershell -ExecutionPolicy Bypass -File .\\start.ps1 -Demo")
     print("[demo] Back to live:   restart without -Demo (the real log was never touched)")

@@ -53,6 +53,18 @@ const BT = (function () {
     return base;
   }
 
+  // Advance any counted-seconds value locally between snapshots, but only while
+  // it is actively accruing AND the server says time is counting. Used for the
+  // unit total/elapsed numbers: a RUNNING bay accrues; a DONE (work-finished,
+  // waiting) bay is frozen.
+  function liveSeconds(base, accruing) {
+    base = Math.max(0, base || 0);
+    if (accruing && lastSnapshot && lastSnapshot.is_counting) {
+      base += (Date.now() - snapshotAt) / 1000;
+    }
+    return base;
+  }
+
   // ---- connection handling ----
   function handleMessage(type, data) {
     lastMessageAt = Date.now();
@@ -140,6 +152,6 @@ const BT = (function () {
       .replace(/"/g, "&quot;");
   }
 
-  return { fmtElapsed, fmtAgo, liveElapsed, connect, startTicker, post, get,
-           escapeHtml, getSnapshot: () => lastSnapshot };
+  return { fmtElapsed, fmtAgo, liveElapsed, liveSeconds, connect, startTicker,
+           post, get, escapeHtml, getSnapshot: () => lastSnapshot };
 })();

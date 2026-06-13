@@ -75,6 +75,11 @@ class BayRun:
         self.bay_id = bay_id
         self.started: datetime = started
         self.ended: Optional[datetime] = None
+        # When the operator logged COMPLETE_BAY: work at this bay is finished
+        # but the part PHYSICALLY STAYS in the bay (a distinct DONE state) until
+        # it is moved, merged, or the unit completes. Active time stops here,
+        # but the bay keeps showing the part (never a misleading "IDLE").
+        self.work_done_at: Optional[datetime] = None
         self.started_by = started_by
         self.completed_by: Optional[str] = None
         self.end_kind: Optional[str] = None  # MOVE|COMPLETE_BAY|MATE|UNIT_COMPLETE|SCRAP
@@ -88,19 +93,33 @@ class BayRun:
 
     @property
     def status(self) -> str:
-        if self.is_open:
-            return "DELAYED" if self.current_delay else "RUNNING"
-        return "CLOSED"
+        if not self.is_open:
+            return "CLOSED"
+        if self.current_delay:
+            return "DELAYED"
+        if self.work_done_at is not None:
+            return "DONE"          # work finished; part still occupies the bay
+        return "RUNNING"
+
+    def _active_end(self, fallback_end: datetime) -> datetime:
+        """When active time stops accruing: at work-done if set, else when the
+        run ended, else now. (Work-done freezes active time even though the
+        bay stays occupied until the part is physically moved out.)"""
+        if self.work_done_at is not None:
+            return self.work_done_at
+        return self.ended or fallback_end
 
     def occupied_interval(self, fallback_end: datetime) -> Interval:
+        # Occupancy runs until the part actually leaves the bay (ended), which
+        # may be later than work-done.
         return (self.started, self.ended or fallback_end)
 
     def delayed_intervals(self, fallback_end: datetime) -> List[Interval]:
         return [(d.started, d.cleared or fallback_end) for d in self.delays]
 
     def running_intervals(self, fallback_end: datetime) -> List[Interval]:
-        """Occupied time minus delayed time = time the bay was actually RUNNING."""
-        return _subtract([self.occupied_interval(fallback_end)],
+        """Active (RUNNING) time = from start to work-done/end, minus delays."""
+        return _subtract([(self.started, self._active_end(fallback_end))],
                          self.delayed_intervals(fallback_end))
 
 
@@ -261,9 +280,19 @@ def replay(conn) -> ReplayResult:
             u.bays_visited.append(dst_bay)
 
         elif etype == "COMPLETE_BAY":
+            # New model: completing work at a bay does NOT free it. The part
+            # stays in the bay (DONE state) until a later MOVE / MATE /
+            # UNIT_COMPLETE physically moves it out. We just stamp work_done_at
+            # (idempotent) and, if a delay was somehow still open, clear it.
             run = result.bay_current.get(bay)
-            if run:
-                close_run(run, when, "COMPLETE_BAY", r["initials"])
+            if run and run.is_open:
+                if run.work_done_at is None:
+                    run.work_done_at = when
+                if run.current_delay:
+                    run.current_delay.cleared = when
+                    run.current_delay.cleared_by = r["initials"]
+                    run.current_delay = None
+                run.completed_by = r["initials"]
 
         elif etype == "MATE":
             releasing = r["target_bay_id"]
@@ -336,7 +365,18 @@ def replay(conn) -> ReplayResult:
 
 def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
                    now: datetime) -> Dict[str, Optional[float]]:
-    """Return active/delay/queue/cycle SECONDS for a unit (None when still open)."""
+    """Return active/delay/queue/cycle SECONDS for a unit (None when still open).
+
+    * active = counted UNION of the unit's running intervals (parallel work in
+      two bays is counted once, never doubled).
+    * delay  = counted delayed time when NO bay of the unit is simultaneously
+      running.
+    * cycle  = total counted time from the unit's first start to its end.
+    * queue  = the remainder (cycle - active - delay): everything the unit spent
+      neither actively worked nor delayed -- i.e. WAITING. In the new occupancy
+      model that waiting happens while the part sits DONE in a bay (or, in older
+      logs, between bays); either way this captures it.
+    """
     if unit.is_open:
         return {"active": None, "delay": None, "queue": None, "cycle": None}
     end = unit.completed or now
@@ -344,21 +384,35 @@ def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
 
     running_all: List[Interval] = []
     delayed_all: List[Interval] = []
-    occupied_all: List[Interval] = []
     for r in unit_runs:
         running_all += r.running_intervals(end)
         delayed_all += r.delayed_intervals(end)
-        occupied_all.append(r.occupied_interval(end))
 
     active = counted_over(sched, running_all)
-    # Delay at unit level: delayed time when NOT simultaneously running elsewhere.
     delay = counted_over(sched, _subtract(merge_intervals(delayed_all),
                                           merge_intervals(running_all)))
-    # Queue: span minus any bay occupancy.
-    queue_iv = _subtract([(unit.first_started, end)], merge_intervals(occupied_all))
-    queue = counted_over(sched, queue_iv)
-    cycle = active + delay + queue
+    cycle = sched.counted_seconds(unit.first_started, end)
+    queue = max(0.0, cycle - active - delay)
     return {"active": active, "delay": delay, "queue": queue, "cycle": cycle}
+
+
+def unit_live_active(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
+                     now: datetime) -> Tuple[float, float]:
+    """Live (open-unit) active time as (elapsed, total) counted SECONDS.
+
+    * elapsed = counted UNION across the unit's bays (wall-clock-ish progress).
+    * total   = counted SUM across the unit's bays (parallel work added up).
+    They are equal for a unit that never ran in two bays at once; after two
+    parallel halves merge, total stays ahead of elapsed by the overlap.
+    """
+    unit_runs = [r for r in runs if r.work_order == unit.work_order]
+    running_all: List[Interval] = []
+    total = 0.0
+    for r in unit_runs:
+        ivs = r.running_intervals(now)
+        running_all += ivs
+        total += counted_over(sched, ivs)
+    return counted_over(sched, running_all), total
 
 
 # ---------------------------------------------------------------------------
@@ -435,9 +489,14 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
             "delay": None,
             "paused_status": None,   # what the bay would be if not for the break
             "occupies_two": False,
+            # Unit-level live times (counted seconds). elapsed = parallel-aware
+            # union; total = sum across the unit's bays. Equal unless the unit
+            # ran in two bays at once (then total stays ahead after they merge).
+            "unit_elapsed_seconds": 0,
+            "unit_total_seconds": 0,
         }
         if run is not None:
-            underlying = run.status  # RUNNING or DELAYED
+            underlying = run.status  # RUNNING | DELAYED | DONE
             tile["work_order"] = run.work_order
             tile["product_number"] = run.product_number
             tile["component_label"] = run.component_label
@@ -445,6 +504,10 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
             # 2-bay indicator (a unit may occupy up to 2 bays).
             u = result.units.get(run.work_order)
             tile["occupies_two"] = bool(u and len(u.occupied_bays) >= 2)
+            if u is not None:
+                elapsed_u, total_u = unit_live_active(sched, u, result.runs, now)
+                tile["unit_elapsed_seconds"] = int(elapsed_u)
+                tile["unit_total_seconds"] = int(total_u)
 
             if underlying == "DELAYED":
                 d = run.current_delay
@@ -457,7 +520,7 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
                     "since": _fmt(d.started),
                     "flagged_by": d.flagged_by,
                 }
-            else:  # RUNNING -> show active time so far
+            else:  # RUNNING or DONE -> show this bay's active time so far
                 tile["elapsed_seconds"] = int(
                     counted_over(sched, run.running_intervals(now)))
 

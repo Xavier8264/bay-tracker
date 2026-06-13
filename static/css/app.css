@@ -22,6 +22,7 @@
   --running:   #1f9d57;   --running-2:   #25b866;   /* green               */
   --delayed:   #d23b3b;   --delayed-2:   #f5a5a;    /* red                 */
   --break:     #2f6df0;   --break-2:     #4a86ff;   /* blue (NOT red!)     */
+  --done:      #b9821b;   --done-text:   #fff3da;   /* amber: work done, part still in bay */
 
   --accent:    #4a86ff;
   --warn:      #e6a417;
@@ -84,6 +85,7 @@ button:hover, .btn:hover { border-color: var(--accent); }
 button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger,  .btn.danger  { background: var(--delayed); border-color: var(--delayed); color: #fff; }
 button.good,    .btn.good    { background: var(--running); border-color: var(--running); color: #fff; }
+button.warn,    .btn.warn    { background: var(--done); border-color: var(--done); color: var(--done-text); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 
 input, select, textarea {
@@ -141,7 +143,6 @@ body.fillscreen .grid-wrap {
 }
 body.fillscreen .bay-grid { flex: 1; min-height: 0; }
 body.fillscreen .tile { min-height: 0; }
-body.fillscreen #wip-card { flex: 0 0 auto; max-height: 28vh; overflow: auto; }
 
 /* ---- demo-mode badge: shown whenever the served database is the demo one,
    so example data can never be mistaken for (or logged into) the real log. */
@@ -168,6 +169,7 @@ body.fillscreen #wip-card { flex: 0 0 auto; max-height: 28vh; overflow: auto; }
 .tile.running { background: var(--running); color: #eafff3; }
 .tile.delayed { background: var(--delayed); color: #fff; }
 .tile.on_break { background: var(--break); color: #eef4ff; }
+.tile.done { background: var(--done); color: var(--done-text); }
 
 .tile .bay-name { font-size: 15px; font-weight: 700; opacity: .9; display:flex; gap:8px; align-items:center;}
 .tile .state-label {

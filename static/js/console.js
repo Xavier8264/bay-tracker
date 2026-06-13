@@ -32,8 +32,20 @@
   function effStatus(t) { return t.status === "ON_BREAK" ? (t.paused_status || "IDLE") : t.status; }
 
   // ---- grid rendering (clickable) ----------------------------------------
-  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸" };
-  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK" };
+  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸", DONE: "✔" };
+  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE" };
+
+  // The unit's elapsed (parallel-aware union) and, when the unit ran in two
+  // bays at once, its total (the summed bay-times). They tick while the bay is
+  // actively RUNNING and freeze once it is DONE/paused.
+  function timeRows(t, accruing) {
+    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, accruing));
+    const showTotal = (t.unit_total_seconds || 0) - (t.unit_elapsed_seconds || 0) >= 1;
+    const totalRow = showTotal
+      ? `<div class="tile-row"><span class="meta">total</span><span class="meta">${BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, accruing))}</span></div>`
+      : "";
+    return { elapsed, totalRow };
+  }
 
   function tileHTML(t) {
     const cls = "tile clickable " + t.status.toLowerCase();
@@ -44,25 +56,31 @@
         <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
         <div class="meta">tap to start</div></div>`;
     }
-    const elapsed = BT.fmtElapsed(BT.liveElapsed(t));
-    if (effStatus(t) === "DELAYED") {
+    const es = effStatus(t);
+    const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
+
+    if (es === "DELAYED") {
       const d = t.delay || {};
       const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
-      const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
+      const delayElapsed = BT.fmtElapsed(BT.liveElapsed(t));
       return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
         <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
         <div class="wo">${BT.escapeHtml(t.work_order)}</div>
         <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
         <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
-        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${elapsed}</span></div></div>`;
+        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayElapsed}</span></div></div>`;
     }
-    const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
+
+    // RUNNING or DONE (work finished, part still in the bay, awaiting next step)
+    const accruing = es === "RUNNING";
+    const { elapsed, totalRow } = timeRows(t, accruing);
+    const label = t.status === "ON_BREAK" ? "paused" : (es === "DONE" ? "done — awaiting" : "active");
     return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
       <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
       <div class="wo">${BT.escapeHtml(t.work_order)}</div>
       <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-      <div class="tile-row"><span class="meta">${t.status === "ON_BREAK" ? "paused" : "active"}</span>
-        <span class="elapsed">${elapsed}</span></div></div>`;
+      <div class="tile-row"><span class="meta">${label}</span><span class="elapsed">${elapsed}</span></div>
+      ${totalRow}</div>`;
   }
 
   function render(snap) {
@@ -98,16 +116,6 @@
       banner.textContent = "⏸ ON BREAK — timers paused (you can still log actions)"; }
     else if (snap.off_hours) { banner.classList.add("off");
       banner.textContent = "OFF-HOURS — timers paused (you can still log actions)"; }
-
-    // WIP pool
-    const wipCard = document.getElementById("wip-card");
-    const wipList = document.getElementById("wip-list");
-    if (snap.queue && snap.queue.length) {
-      wipCard.style.display = "";
-      wipList.innerHTML = snap.queue.map(q =>
-        `<button class="btn" data-wo="${BT.escapeHtml(q.work_order)}" data-pn="${BT.escapeHtml(q.product_number||"")}">
-           ${BT.escapeHtml(q.work_order)} <span class="hint">${BT.escapeHtml(q.product_number||"")}</span></button>`).join("");
-    } else { wipCard.style.display = "none"; wipList.innerHTML = ""; }
   }
 
   // ---- modal helpers ------------------------------------------------------
@@ -144,35 +152,45 @@
     const st = effStatus(t);
     if (st === "IDLE") return startModal(t);
 
+    // Other bays holding the SAME unit -> available as merge targets.
+    const mergeable = snap.tiles.filter(x => x.bay_id !== t.bay_id
+      && x.work_order && x.work_order === t.work_order && effStatus(x) !== "IDLE");
+
     const buttons = [];
     if (st === "DELAYED") {
       buttons.push(`<button class="good" data-act="clear">✓ Clear delay</button>`);
+      buttons.push(`<button data-act="move">→ Move to bay…</button>`);
+    } else if (st === "DONE") {
+      // Work finished here; the part waits in the bay. It can only move onward.
+      buttons.push(`<button data-act="move">→ Move to bay…</button>`);
     } else { // RUNNING
       buttons.push(`<button class="danger" data-act="delay">⚠ Flag delay</button>`);
       buttons.push(`<button data-act="move">→ Move to bay…</button>`);
-      buttons.push(`<button data-act="complete">✓ Complete at bay (to queue)</button>`);
-      if (t.occupies_two) buttons.push(`<button data-act="mate">⚯ Mate (join 2 bays)</button>`);
+      buttons.push(`<button class="warn" data-act="complete">✓ Work done at bay (stays here)</button>`);
     }
+    if (mergeable.length) buttons.push(`<button data-act="merge">⚯ Merge into bay…</button>`);
     buttons.push(`<button data-act="unit_complete">★ Unit complete</button>`);
 
+    const stLabel = st === "DONE" ? "done — awaiting next step" : st;
     openModal(`<h2>${BT.escapeHtml(t.name)} — ${BT.escapeHtml(t.work_order)}</h2>
-      <div class="sub">${BT.escapeHtml(t.product_number || "")} · ${st}${t.component_label ? " · " + BT.escapeHtml(t.component_label) : ""}</div>
+      <div class="sub">${BT.escapeHtml(t.product_number || "")} · ${stLabel}${t.component_label ? " · " + BT.escapeHtml(t.component_label) : ""}</div>
       <div class="action-menu">${buttons.join("")}</div>
       <div class="actions"><button id="cancel">Cancel</button></div>`);
     document.getElementById("cancel").onclick = closeModal;
-    modal.querySelectorAll("[data-act]").forEach(b => b.onclick = () => routeAction(b.dataset.act, t));
+    modal.querySelectorAll("[data-act]").forEach(b => b.onclick = () => routeAction(b.dataset.act, t, mergeable));
   }
 
-  function routeAction(act, t) {
+  function routeAction(act, t, mergeable) {
     if (act === "clear") return confirmModal("Clear delay",
       `Clear the delay on <b>${BT.escapeHtml(t.name)}</b> (${BT.escapeHtml(t.work_order)})? The bay returns to running.`,
       (btn, ini) => doAction({ action: "clear_delay", bay_id: t.bay_id, initials: ini }, btn));
     if (act === "delay") return delayModal(t);
     if (act === "move") return moveModal(t);
-    if (act === "complete") return confirmModal("Complete at bay",
-      `Complete <b>${BT.escapeHtml(t.work_order)}</b> at ${BT.escapeHtml(t.name)}? It moves to the WIP/queue pool and the bay frees up.`,
+    if (act === "complete") return confirmModal("Work done at bay",
+      `Mark work on <b>${BT.escapeHtml(t.work_order)}</b> finished at ${BT.escapeHtml(t.name)}? ` +
+      `The part stays in the bay (amber) until you move, merge, or complete the whole unit.`,
       (btn, ini) => doAction({ action: "complete_bay", bay_id: t.bay_id, initials: ini }, btn));
-    if (act === "mate") return mateModal(t);
+    if (act === "merge") return mergeModal(t, mergeable || []);
     if (act === "unit_complete") return confirmModal("Unit complete",
       `Mark work order <b>${BT.escapeHtml(t.work_order)}</b> as fully complete? This ends its journey.`,
       (btn, ini) => doAction({ action: "unit_complete", work_order: t.work_order, initials: ini }, btn));
@@ -286,43 +304,24 @@
       initials: document.getElementById("f-initials").value.trim() }, e.target);
   }
 
-  // ---- Mate ----
-  function mateModal(t) {
-    const snap = BT.getSnapshot();
-    const other = snap.tiles.find(x => x.bay_id !== t.bay_id && x.work_order === t.work_order
-                                    && effStatus(x) !== "IDLE");
-    if (!other) return;
-    openModal(`<h2>Mate ${BT.escapeHtml(t.work_order)}</h2>
-      <div class="sub">Join the two streams into one continuing unit. Choose which bay it continues in;
-        the other frees up.</div>
-      <div class="action-menu">
-        <button data-keep="${t.bay_id}" data-rel="${other.bay_id}">Continue in ${BT.escapeHtml(t.name)} — free ${BT.escapeHtml(other.name)}</button>
-        <button data-keep="${other.bay_id}" data-rel="${t.bay_id}">Continue in ${BT.escapeHtml(other.name)} — free ${BT.escapeHtml(t.name)}</button>
-      </div>${initialsField()}${errEl()}
-      <div class="actions"><button id="cancel">Cancel</button></div>`);
-    document.getElementById("cancel").onclick = closeModal;
-    modal.querySelectorAll("[data-keep]").forEach(b => b.onclick = (e) => doAction({ action: "mate",
-      keep_bay_id: parseInt(b.dataset.keep, 10), release_bay_id: parseInt(b.dataset.rel, 10),
-      initials: document.getElementById("f-initials").value.trim() }, e.target));
-  }
-
-  // ---- Start-from-queue (WIP chip) ----
-  function startFromQueue(wo, pn) {
-    const snap = BT.getSnapshot();
-    const idle = snap.tiles.filter(x => effStatus(x) === "IDLE");
-    if (!idle.length) { alert("No empty bays available."); return; }
-    const opts = idle.map(b => `<option value="${b.bay_id}">${BT.escapeHtml(b.name)}</option>`).join("");
-    openModal(`<h2>Start ${BT.escapeHtml(wo)} from queue</h2>
-      <div class="sub">${BT.escapeHtml(pn || "")}</div>
-      <label>Into bay *</label><select id="f-target">${opts}</select>
+  // ---- Merge (join two bays holding the same unit into one continuing bay) ----
+  function mergeModal(t, mergeable) {
+    if (!mergeable.length) return;
+    // "Merge into bay X" => the unit continues in X; this bay (t) frees up.
+    const opts = mergeable.map(b =>
+      `<option value="${b.bay_id}">${BT.escapeHtml(b.name)}${b.component_label ? " · " + BT.escapeHtml(b.component_label) : ""}</option>`).join("");
+    openModal(`<h2>Merge ${BT.escapeHtml(t.work_order)}</h2>
+      <div class="sub">Join the two halves into one continuing unit. The merged unit stays in the
+        target bay; <b>${BT.escapeHtml(t.name)}</b> frees up.</div>
+      <label>Continue in (merge into) *</label><select id="f-target">${opts}</select>
       ${initialsField()}${errEl()}
       <div class="actions"><button id="cancel">Cancel</button>
-        <button class="primary" id="go">Start</button></div>`);
+        <button class="primary" id="go">⚯ Merge</button></div>`);
     document.getElementById("cancel").onclick = closeModal;
-    document.getElementById("go").onclick = (e) => doAction({ action: "start",
-      bay_id: parseInt(document.getElementById("f-target").value, 10),
-      work_order: wo, product_number: pn,
-      initials: document.getElementById("f-initials").value.trim() }, e.target);
+    document.getElementById("go").onclick = (e) => doAction({ action: "mate",
+      keep_bay_id: parseInt(document.getElementById("f-target").value, 10),
+      release_bay_id: t.bay_id,
+      initials: enteredInitials() }, e.target);
   }
 
   // ---- confirm (actions that need no other input). Initials are entered
@@ -341,10 +340,6 @@
   document.getElementById("grid").addEventListener("click", e => {
     const tile = e.target.closest(".tile.clickable");
     if (tile) openBay(parseInt(tile.dataset.bay, 10));
-  });
-  document.getElementById("wip-list").addEventListener("click", e => {
-    const b = e.target.closest("[data-wo]");
-    if (b) startFromQueue(b.dataset.wo, b.dataset.pn);
   });
 
   // ---- boot ---------------------------------------------------------------

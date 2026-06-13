@@ -103,7 +103,8 @@ def move(conn, bay_id, target_bay_id, initials):
 
 
 def complete_bay(conn, bay_id, initials):
-    """Unit leaves this bay into the WIP/queue pool."""
+    """Mark work finished at this bay. The part STAYS in the bay (DONE state)
+    until a later move/merge/unit-complete; the bay is not freed here."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
     r = state.replay(conn)

@@ -187,6 +187,43 @@ def test_multi_bay_parallel_journey():
     conn.close()
 
 
+def test_complete_bay_keeps_part_in_bay():
+    print("== complete-at-bay keeps the part in the bay (DONE), waiting counts as queue ==")
+    conn = fresh_conn()
+    b1 = bay(conn, 1)
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b1, work_order="D", product_number="P")
+    events.append(conn, "COMPLETE_BAY", ts=f"{DAY} 10:30:00", bay_id=b1, work_order="D")
+    # 10:30 onward: work done, part still sits in bay 1 (DONE), not freed.
+    snap = state.live_snapshot(conn, now=T("11:00"))
+    tile = next(t for t in snap["tiles"] if t["bay_id"] == b1)
+    check("bay still occupied (not IDLE)", float(tile["status"] == "DONE"), 1.0)
+    check("DONE bay active time frozen at 30m", tile["unit_elapsed_seconds"] / 60.0, 30)
+    # Now finish the unit at 11:00; the 10:30->11:00 wait is queue, active stays 30.
+    events.append(conn, "UNIT_COMPLETE", ts=f"{DAY} 11:00:00", work_order="D")
+    d = unit_durs(conn, "D")
+    check("active 30m (stopped at work-done)", d["active"] / 60, 30)
+    check("queue 30m (waited in the bay)", d["queue"] / 60, 30)
+    check("cycle 60m", d["cycle"] / 60, 60)
+    conn.close()
+
+
+def test_merge_total_vs_elapsed():
+    print("== merged unit: total (summed bays) exceeds elapsed (union) ==")
+    conn = fresh_conn()
+    b1, b2 = bay(conn, 1), bay(conn, 2)
+    # Two halves run in parallel for 60m, then merge into bay 1 and keep going.
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b1, work_order="G", product_number="P", component_label="A")
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b2, work_order="G", product_number="P", component_label="B")
+    events.append(conn, "MATE", ts=f"{DAY} 11:00:00", bay_id=b1, target_bay_id=b2, work_order="G")
+    snap = state.live_snapshot(conn, now=T("11:30"))
+    tile = next(t for t in snap["tiles"] if t["bay_id"] == b1)
+    check("bay 2 freed after merge", float(any(t["bay_id"] == b2 and t["status"] == "IDLE" for t in snap["tiles"])), 1.0)
+    # elapsed = union 10:00->11:30 = 90m; total = bay1(90) + bay2(60) = 150m.
+    check("elapsed 90m (union)", tile["unit_elapsed_seconds"] / 60.0, 90)
+    check("total 150m (summed)", tile["unit_total_seconds"] / 60.0, 150)
+    conn.close()
+
+
 def main():
     try:
         test_schedule_breaks_and_offhours()
@@ -196,6 +233,8 @@ def main():
         test_delay_partition_and_break()
         test_queue_time()
         test_multi_bay_parallel_journey()
+        test_complete_bay_keeps_part_in_bay()
+        test_merge_total_vs_elapsed()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
     print("\n" + ("ALL TIME-ENGINE TESTS PASSED" if not _FAILS else f"FAILURES: {_FAILS}"))
