@@ -455,9 +455,19 @@ def _register_admin_routes(app):
         elif op == "update":
             conn.execute("UPDATE divisions SET name = ? WHERE id = ?;",
                          ((p.get("name") or "").strip(), p["id"]))
-        elif op in ("retire", "activate"):
-            conn.execute("UPDATE divisions SET active = ? WHERE id = ?;",
-                         (0 if op == "retire" else 1, p["id"]))
+        elif op == "delete":
+            # Hard delete. Safe for history: delay events snapshot the division
+            # NAME onto themselves, so removing the config row never rewrites a
+            # past record. Guard only against orphaning a *reason* that still
+            # points here, which would silently blank that reason's division on
+            # future delays.
+            used = conn.execute("SELECT COUNT(*) AS n FROM delay_reasons WHERE division_id = ?;",
+                                (p["id"],)).fetchone()["n"]
+            if used:
+                return jsonify({"ok": False,
+                                "error": f"{used} delay reason(s) still use this division — "
+                                         "delete or reassign them first."}), 400
+            conn.execute("DELETE FROM divisions WHERE id = ?;", (p["id"],))
         conn.commit()
         return jsonify({"ok": True})
 
@@ -489,13 +499,15 @@ def _register_admin_routes(app):
                 "in_out_of_control = ? WHERE id = ?;",
                 ((p.get("label") or "").strip(), p.get("division_id") or None,
                  p.get("in_out_of_control") or None, p["id"]))
-        elif op in ("retire", "activate"):
+        elif op == "delete":
+            # Hard delete. Safe for history: delay events snapshot the reason
+            # label/division/control tag, so deleting the config row leaves
+            # every past delay intact. The mandatory pinned "Other" stays.
             row = conn.execute("SELECT is_other FROM delay_reasons WHERE id = ?;",
                                (p["id"],)).fetchone()
             if row and row["is_other"]:
-                return jsonify({"ok": False, "error": "The 'Other' reason can't be retired."}), 400
-            conn.execute("UPDATE delay_reasons SET active = ? WHERE id = ?;",
-                         (0 if op == "retire" else 1, p["id"]))
+                return jsonify({"ok": False, "error": "The 'Other' reason can't be deleted."}), 400
+            conn.execute("DELETE FROM delay_reasons WHERE id = ?;", (p["id"],))
         conn.commit()
         return jsonify({"ok": True})
 
@@ -520,9 +532,11 @@ def _register_admin_routes(app):
                 ((p.get("number") or "").strip(),
                  (p.get("description") or "").strip() or None,
                  p.get("target_minutes"), p["id"]))
-        elif op in ("retire", "activate"):
-            conn.execute("UPDATE product_numbers SET active = ? WHERE id = ?;",
-                         (0 if op == "retire" else 1, p["id"]))
+        elif op == "delete":
+            # Hard delete. Safe for history: events store the product number as
+            # text, not a reference to this list, so removing it changes nothing
+            # already logged.
+            conn.execute("DELETE FROM product_numbers WHERE id = ?;", (p["id"],))
         conn.commit()
         return jsonify({"ok": True})
 

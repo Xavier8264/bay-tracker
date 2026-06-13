@@ -48,9 +48,11 @@
     if (effStatus(t) === "DELAYED") {
       const d = t.delay || {};
       const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
+      const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
       return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
         <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
         <div class="wo">${BT.escapeHtml(t.work_order)}</div>
+        <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
         <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
         <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${elapsed}</span></div></div>`;
     }

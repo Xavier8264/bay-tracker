@@ -42,12 +42,15 @@
   }
 
   // ---- Divisions ----
+  // All config lists use hard DELETE (not soft-retire): delay events snapshot
+  // the division/reason text and products are stored as text, so deleting a
+  // config row never rewrites history. Keeps the lists short year over year.
   function renderDivisions() {
     $("divisions").innerHTML = data.divisions.map(d =>
-      `<tr><td>${esc(d.name)}</td><td>${d.active ? "" : '<span class="badge">retired</span>'}</td>
+      `<tr><td>${esc(d.name)}</td>
         <td style="text-align:right">
           <button class="btn" data-edit-div="${d.id}" data-name="${esc(d.name)}">Rename</button>
-          <button class="btn" data-toggle-div="${d.id}" data-op="${d.active ? "retire" : "activate"}">${d.active ? "Retire" : "Activate"}</button>
+          <button class="btn" data-delete-div="${d.id}" data-name="${esc(d.name)}">Delete</button>
         </td></tr>`).join("") || `<tr><td class="no-data">none yet</td></tr>`;
   }
 
@@ -57,10 +60,9 @@
       const locked = r.is_other;
       return `<tr><td>${esc(r.label)}${locked ? ' <span class="badge">pinned</span>' : ""}</td>
         <td>${esc(r.division_name || "")}</td><td>${esc(r.in_out_of_control || "")}</td>
-        <td>${r.active ? "active" : '<span class="badge">retired</span>'}</td>
         <td style="text-align:right">
           ${locked ? "" : `<button class="btn" data-edit-reason='${JSON.stringify(r).replace(/'/g,"&#39;")}'>Edit</button>
-          <button class="btn" data-toggle-reason="${r.id}" data-op="${r.active ? "retire" : "activate"}">${r.active ? "Retire" : "Activate"}</button>`}
+          <button class="btn" data-delete-reason="${r.id}" data-label="${esc(r.label)}">Delete</button>`}
         </td></tr>`;
     }).join("");
   }
@@ -69,10 +71,9 @@
   function renderProducts() {
     $("products").innerHTML = data.products.map(p =>
       `<tr><td>${esc(p.number)}</td><td>${esc(p.description || "")}</td><td>${p.target_minutes ?? ""}</td>
-        <td>${p.active ? "active" : '<span class="badge">retired</span>'}</td>
         <td style="text-align:right">
           <button class="btn" data-edit-product='${JSON.stringify(p).replace(/'/g,"&#39;")}'>Edit</button>
-          <button class="btn" data-toggle-product="${p.id}" data-op="${p.active ? "retire" : "activate"}">${p.active ? "Retire" : "Activate"}</button>
+          <button class="btn" data-delete-product="${p.id}" data-number="${esc(p.number)}">Delete</button>
         </td></tr>`).join("") || `<tr><td class="no-data">none yet</td></tr>`;
   }
 
@@ -295,11 +296,20 @@
     let b;
     if ((b = e.target.closest("[data-edit-div]"))) promptModal("Rename division", "Name", b.dataset.name,
       v => send("/api/admin/division", { op: "update", id: +b.dataset.editDiv, name: v }));
-    else if ((b = e.target.closest("[data-toggle-div]"))) send("/api/admin/division", { op: b.dataset.op, id: +b.dataset.toggleDiv });
+    else if ((b = e.target.closest("[data-delete-div]"))) {
+      if (confirm(`Delete division "${b.dataset.name}"? Past delays keep their division either way.`))
+        send("/api/admin/division", { op: "delete", id: +b.dataset.deleteDiv });
+    }
     else if ((b = e.target.closest("[data-edit-reason]"))) editReason(JSON.parse(b.dataset.editReason.replace(/&#39;/g, "'")));
-    else if ((b = e.target.closest("[data-toggle-reason]"))) send("/api/admin/reason", { op: b.dataset.op, id: +b.dataset.toggleReason });
+    else if ((b = e.target.closest("[data-delete-reason]"))) {
+      if (confirm(`Delete reason "${b.dataset.label}"? Past delays keep their reason either way.`))
+        send("/api/admin/reason", { op: "delete", id: +b.dataset.deleteReason });
+    }
     else if ((b = e.target.closest("[data-edit-product]"))) editProduct(JSON.parse(b.dataset.editProduct.replace(/&#39;/g, "'")));
-    else if ((b = e.target.closest("[data-toggle-product]"))) send("/api/admin/product", { op: b.dataset.op, id: +b.dataset.toggleProduct });
+    else if ((b = e.target.closest("[data-delete-product]"))) {
+      if (confirm(`Delete product "${b.dataset.number}"? Past runs keep their product number either way.`))
+        send("/api/admin/product", { op: "delete", id: +b.dataset.deleteProduct });
+    }
     else if ((b = e.target.closest("[data-edit-initials]"))) editInitials(JSON.parse(b.dataset.editInitials.replace(/&#39;/g, "'")));
     else if ((b = e.target.closest("[data-delete-initials]"))) {
       if (confirm(`Delete "${b.dataset.ini}" from the roster? Past log entries keep their initials either way.`))
