@@ -115,6 +115,13 @@ if ($InstallService) {
     }
 }
 
+# --- Desktop shortcut (clickable launcher) ----------------------------------
+try {
+    & (Join-Path $RepoDir "make_shortcut.ps1")
+} catch {
+    Write-Warning "Could not create the desktop shortcut: $_"
+}
+
 # --- Done: print the URLs ---------------------------------------------------
 $ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
          Where-Object { $_.IPAddress -notmatch "^(127\.|169\.254\.)" } |

@@ -106,6 +106,12 @@ Leave that window open — the server is now running. Useful options:
 `-Port 8080` (serve elsewhere), `-Threads 64` (more screens; default 32 leaves headroom for
 one long-lived connection per TV + the console).
 
+**Prefer a clickable icon?** `setup.ps1` drops a **"Bay Tracker Server"** shortcut on the
+Desktop that launches the server when double-clicked (no admin prompt). Re-create it any time
+with `powershell -ExecutionPolicy Bypass -File .\make_shortcut.ps1` (add `-Dashboard` to also
+get an icon that opens the live board in a browser). For a server that should come back on its
+own after every reboot, install it as a service instead (see *Run it as a service*).
+
 <details>
 <summary>Manual launch (what start.ps1 runs for you)</summary>
 
@@ -387,6 +393,7 @@ migrate.py        Forward-only, idempotent schema migrations
 backup_db.py      Consistent online backup of the DB
 setup.ps1         One-time install     update.ps1   Safe, reversible update
 start.ps1         THE way to launch by hand (right venv, right data dir, port checks)
+make_shortcut.ps1 Creates a clickable "Bay Tracker Server" desktop launcher
 backup.ps1        Scheduled backup wrapper
 requirements.txt  Exactly pinned dependencies
 baytracker/       Application package:
