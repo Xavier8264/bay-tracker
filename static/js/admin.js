@@ -26,22 +26,36 @@
     shifts = (data.schedule.shifts || []).slice();
     renderAll();
   }
-  async function send(url, body) {
+  async function send(url, body, btn) {
     const r = await BT.post(url, body);
-    if (!r.ok) alert((r.data && r.data.error) || "Save failed.");
-    else toast("Saved ✓");
+    if (!r.ok) { alert((r.data && r.data.error) || "Save failed."); }
+    else { toast("Saved ✓"); if (btn) flashSaved(btn); }
     await load();
     return r.ok;
   }
 
-  // Brief "Saved ✓" confirmation in the corner after a successful save.
+  // Two confirmations after a successful save: a banner toast at the top, and
+  // the clicked button briefly turns green and reads "Saved ✓" -- so there is
+  // no doubt the setting was stored.
   let _toastTimer = null;
   function toast(msg) {
     const el = $("toast"); if (!el) return;
     el.textContent = msg;
     el.classList.add("show");
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+    _toastTimer = setTimeout(() => el.classList.remove("show"), 2400);
+  }
+  function flashSaved(btn) {
+    if (!btn || btn._flashing) return;
+    btn._flashing = true;
+    const orig = btn.textContent;
+    btn.textContent = "Saved ✓";
+    btn.classList.add("saved-flash");
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.classList.remove("saved-flash");
+      btn._flashing = false;
+    }, 1600);
   }
 
   function renderAll() {
@@ -215,9 +229,9 @@
   $("add-initials").onclick = () => send("/api/admin/initials", { op: "add", initials: $("ni-ini").value, name: $("ni-name").value });
   $("add-bay").onclick = () => send("/api/admin/bay", { op: "add_extra", name: $("nb-name").value, grid_col: $("nb-col").value || null });
 
-  $("save-layout").onclick = () => send("/api/admin/layout", {
+  $("save-layout").onclick = (e) => send("/api/admin/layout", {
     grid_cols: parseInt($("lay-cols").value, 10), standard_rows: parseInt($("lay-rows").value, 10),
-    extras_enabled: $("lay-extras").checked });
+    extras_enabled: $("lay-extras").checked }, e.currentTarget);
 
   // ===== breaks / shifts editing =====
   function syncBreaks() {
@@ -238,18 +252,18 @@
     const ds = e.target.closest("[data-del-shift]"); if (ds) { syncShifts(); shifts.splice(+ds.dataset.delShift, 1); renderShifts(); }
   });
   function validHHMM(s) { return /^([01]?\d|2[0-4]):[0-5]\d$/.test(s); }
-  $("save-breaks").onclick = () => {
+  $("save-breaks").onclick = (e) => {
     syncBreaks();
     for (const b of breaks) { if (!validHHMM(b.start)) return alert(`Bad break time: "${b.start}". Use HH:MM.`); }
-    send("/api/admin/schedule", { break_schedule: breaks });
+    send("/api/admin/schedule", { break_schedule: breaks }, e.currentTarget);
   };
-  $("save-shifts").onclick = () => {
+  $("save-shifts").onclick = (e) => {
     syncShifts();
     for (const s of shifts) {
       if (!s.name || !validHHMM(s.start) || !validHHMM(s.end))
         return alert(`Each shift needs a name plus HH:MM start and end (a window may wrap midnight, e.g. 22:00-06:00).`);
     }
-    send("/api/admin/schedule", { shifts });
+    send("/api/admin/schedule", { shifts }, e.currentTarget);
   };
 
   // ===== operating calendar =====
@@ -269,25 +283,26 @@
     }
     return out;
   }
-  $("save-oc").onclick = () => {
-    if (!$("oc-enabled").checked) return send("/api/admin/schedule", { operating_calendar: null });
+  $("save-oc").onclick = (e) => {
+    const btn = e.currentTarget;
+    if (!$("oc-enabled").checked) return send("/api/admin/schedule", { operating_calendar: null }, btn);
     const oc = {};
     try {
       document.querySelectorAll("[data-oc]").forEach(inp => {
         const wins = parseWindows(inp.value);
         if (wins.length) oc[inp.dataset.oc] = wins;
       });
-    } catch (e) { return alert(e.message); }
-    send("/api/admin/schedule", { operating_calendar: oc });
+    } catch (err) { return alert(err.message); }
+    send("/api/admin/schedule", { operating_calendar: oc }, btn);
   };
 
   // ===== settings & pins =====
-  $("save-settings").onclick = () => send("/api/admin/settings", {
+  $("save-settings").onclick = (e) => send("/api/admin/settings", {
     takeover_seconds: parseInt($("set-takeover").value, 10),
     labor_rate: $("set-rate").value === "" ? null : parseFloat($("set-rate").value),
     stale_delay_minutes: parseInt($("set-staled").value, 10),
     stale_run_minutes: parseInt($("set-staler").value, 10),
-    backup_network_path: $("set-backup").value.trim() || null });
+    backup_network_path: $("set-backup").value.trim() || null }, e.currentTarget);
   $("save-pins").onclick = async () => {
     // A non-empty field sets a new PIN; the "Clear" checkbox removes it; an empty
     // field with no checkbox leaves that PIN unchanged (can't wipe by accident).

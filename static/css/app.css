@@ -289,16 +289,21 @@ canvas { max-width: 100%; }
 .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: flex-end; }
 .toolbar .col { min-width: 150px; flex: 0 1 auto; }
 
-/* save confirmation toast (admin) */
+/* save confirmation toast (admin): a banner that drops in from the top-center */
 .toast {
-  position: fixed; bottom: 22px; right: 22px; z-index: 9999;
-  background: var(--good); color: #04210f; font-weight: 700;
-  padding: 11px 18px; border-radius: 10px; font-size: 15px;
-  box-shadow: 0 6px 22px rgba(0,0,0,.35);
-  opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s;
+  position: fixed; top: 18px; left: 50%; z-index: 9999;
+  background: var(--good); color: #04210f; font-weight: 800;
+  padding: 12px 26px; border-radius: 10px; font-size: 17px; letter-spacing: .3px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.4);
+  opacity: 0; transform: translate(-50%, -14px); transition: opacity .18s, transform .18s;
   pointer-events: none;
 }
-.toast.show { opacity: 1; transform: translateY(0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* the clicked Save button briefly turns green and reads "Saved ✓" */
+button.saved-flash, .btn.saved-flash {
+  background: var(--good); border-color: var(--good); color: #04210f;
+}
 
 /* unlock page */
 .unlock-wrap { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
