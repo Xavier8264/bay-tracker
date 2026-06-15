@@ -26,7 +26,8 @@ from . import config
 # The schema version this code expects. migrate.py bumps the stored value as it
 # applies additive changes; it is informational/forward-only and never triggers
 # a destructive reset.
-SCHEMA_VERSION = 1
+#   v2 (2026-06): added recipients + notification_outbox (delay notifications).
+SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,53 @@ CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT
 );
+
+-- =====================================================================
+-- recipients : people who get a delay alert. Edited live in /admin, exactly
+-- like delay_reasons -- no code change to add/remove someone. A recipient has
+-- contact details, per-channel on/off switches, and a scope of what they hear
+-- about. Soft-retired (active=0), never hard-deleted, so the outbox audit trail
+-- can always be traced back to a recipient row.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS recipients (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    email         TEXT,
+    phone         TEXT,                          -- E.164 only, e.g. +14145551234
+    notify_email  INTEGER NOT NULL DEFAULT 0,    -- 0/1
+    notify_sms    INTEGER NOT NULL DEFAULT 0,    -- 0/1
+    bay_scope     TEXT    NOT NULL DEFAULT 'all', -- 'all' or CSV of bays.id, e.g. '7,8,9'
+    control_scope TEXT    NOT NULL DEFAULT 'all', -- 'all' or 'out' (out-of-control delays only)
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- =====================================================================
+-- notification_outbox : the reliability core. Every intended send is a row.
+-- This table IS the queue AND the audit log. The web request that logs a delay
+-- only INSERTs 'pending' rows here (never touches the network); a background
+-- worker (see notify.py) sends them and retries with backoff. destination is
+-- snapshotted at enqueue time so editing a recipient later never rewrites the
+-- record of what was actually sent. delay_event_id points at the DELAY_START
+-- row in events -- the only "delay record" this app has.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    delay_event_id  INTEGER NOT NULL,                       -- events.id of the DELAY_START row
+    recipient_id    INTEGER,                                -- recipients.id (kept even if recipient retired)
+    channel         TEXT    NOT NULL,                       -- 'email' | 'sms'
+    destination     TEXT    NOT NULL,                       -- snapshot of email/phone at enqueue time
+    subject         TEXT,                                   -- email only
+    body            TEXT    NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pending',     -- pending|sending|sent|failed
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    next_attempt_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    sent_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_pending
+    ON notification_outbox(status, next_attempt_at);
 
 -- =====================================================================
 -- schema_version : single-row table recording the applied schema version so

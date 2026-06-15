@@ -13,6 +13,8 @@
 Flask==3.1.3          # web framework (routing, templates, sessions)
 waitress==3.0.2       # production-grade pure-Python WSGI server (Windows-friendly)
 openpyxl==3.1.5       # writes the .xlsx export workbook (with text-typed cells)
+requests==2.34.2      # delay notifications: HTTP calls to Postmark / Twilio
+python-dotenv==1.2.2  # delay notifications: optional DATA_DIR/notify.env loader
 
 # --- Transitive dependencies (pinned for a fully reproducible install) ---
 Werkzeug==3.1.8       # WSGI utilities used by Flask (also provides password hashing)
@@ -23,3 +25,7 @@ click==8.4.1          # CLI plumbing pulled in by Flask
 blinker==1.9.0        # signal support pulled in by Flask
 colorama==0.4.6       # colored terminal output on Windows (pulled in by click)
 et-xmlfile==2.0.0     # XML streaming writer used by openpyxl
+certifi==2026.5.20    # CA bundle used by requests
+charset-normalizer==3.4.7  # text encoding detection used by requests
+idna==3.18            # internationalized domain names used by requests
+urllib3==2.7.0        # HTTP connection pooling used by requests

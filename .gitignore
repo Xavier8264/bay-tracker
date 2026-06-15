@@ -21,6 +21,11 @@
 *.log
 backups/
 
+# Notification secrets. The real file lives in BAYTRACKER_DATA (outside the repo),
+# but ignore any *.env here too in case one is dropped in during local testing.
+*.env
+notify.env
+
 # Generated exports (Stats page writes these to a temp/working dir)
 exports/
 *.xlsx

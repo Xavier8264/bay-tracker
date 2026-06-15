@@ -123,6 +123,26 @@
     <div class="actions"><button class="primary" id="save-settings">Save settings</button></div>
   </div>
 
+  <!-- Delay notifications -->
+  <div class="card"><h2>Delay notifications</h2>
+    <p class="hint">People here get an email (SMS later) when a bay is flagged DELAYED. Editing this list
+      takes effect immediately — no code change. Logging a delay only queues the alert locally; a
+      background worker sends it and retries, so a wifi drop never loses one.</p>
+    <div id="notify-status"></div>
+    <div class="toolbar">
+      <div class="col"><label>Name</label><input id="nrec-name" placeholder="e.g. Pat Lee"></div>
+      <div class="col"><label>Email</label><input id="nrec-email" placeholder="pat@yourco.com"></div>
+      <div class="col"><label>Phone <span class="hint">(E.164)</span></label><input id="nrec-phone" placeholder="+14145551234"></div>
+      <div class="col"><label><input type="checkbox" id="nrec-email-on" style="width:auto"> Email</label></div>
+      <div class="col"><label><input type="checkbox" id="nrec-sms-on" style="width:auto"> SMS</label></div>
+      <button class="primary" id="add-recipient">Add</button>
+    </div>
+    <p class="hint">New recipients default to <b>all bays, all delays</b>. Use <b>Edit</b> to limit
+      someone to certain bays or to out-of-control delays only.</p>
+    <table><thead><tr><th>Name</th><th>Email</th><th>SMS</th><th>Scope</th><th>Status</th><th></th></tr></thead>
+      <tbody id="recipients"></tbody></table>
+  </div>
+
   <!-- PINs -->
   <div class="card"><h2>PINs</h2>
     <p class="hint">Protect Stats (cost/analysis) and Admin (configuration). Leave blank and save to clear a PIN.</p>

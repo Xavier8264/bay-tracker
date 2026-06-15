@@ -22,7 +22,7 @@ from flask import (Flask, Response, jsonify, redirect, render_template,
 from io import BytesIO
 
 from baytracker import (__version__, actions, auth, bootstrap, config, db,
-                        events, exports, metrics, state)
+                        events, exports, metrics, notify, notify_config, state)
 from baytracker.app_db import close_db, get_db
 from baytracker.actions import ActionError
 from baytracker.sse import broker
@@ -168,6 +168,13 @@ def create_app() -> Flask:
         _publish_state(conn)
         if row is not None and row["type"] == "DELAY_START":
             _publish_delay_takeover(conn, row)
+            # Write delay-alert intent to the local outbox (no network here -- a
+            # background worker sends and retries). Guarded so a notification
+            # hiccup can never fail the action that already logged the delay.
+            try:
+                notify.enqueue_notifications(conn, row)
+            except Exception:
+                pass
         return jsonify({"ok": True})
 
     # ---------------------------------------------------------------
@@ -260,6 +267,10 @@ def create_app() -> Flask:
     # ---------------------------------------------------------------
     _start_heartbeat()
 
+    # Background outbox worker: send queued delay notifications and retry
+    # failures with backoff (same daemon-thread pattern as the heartbeat).
+    notify.start_outbox_worker()
+
     return app
 
 
@@ -338,6 +349,38 @@ def _filters_from_query() -> dict:
     return {k: request.args.get(k) for k in keys if request.args.get(k)}
 
 
+def _normalize_phone(raw):
+    """Coerce a typed phone to E.164 ('+1' + 10 digits) so Twilio doesn't fail
+    silently later. Returns None for blank input. Best-effort: a '+'-prefixed
+    international number is kept as-is (digits only); a bare US 10-digit number
+    gets '+1'; '1XXXXXXXXXX' gets a leading '+'."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return None
+    if s.startswith("+"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return "+" + digits
+
+
+def _clean_bay_scope(value):
+    """Normalize a recipient bay scope to 'all' or a CSV of integer bay ids.
+    Accepts 'all', a list of ids (from the admin checklist), or a CSV string."""
+    if value in (None, "", "all"):
+        return "all"
+    if isinstance(value, (list, tuple)):
+        ids = [str(int(x)) for x in value if str(x).strip()]
+    else:
+        ids = [s.strip() for s in str(value).split(",") if s.strip().isdigit()]
+    return ",".join(ids) if ids else "all"
+
+
 def _publish_state(conn):
     """Build a fresh snapshot and push it to every connected browser."""
     broker.publish("state", state.live_snapshot(conn))
@@ -411,12 +454,20 @@ def _register_admin_routes(app):
             "SELECT * FROM initials_roster ORDER BY active DESC, initials;").fetchall()]
         bays = [dict(r) for r in conn.execute(
             "SELECT * FROM bays ORDER BY is_extra, sort_order;").fetchall()]
+        recipients = [dict(r) for r in conn.execute(
+            "SELECT * FROM recipients ORDER BY active DESC, name;").fetchall()]
         return jsonify({
             "divisions": divisions,
             "reasons": reasons,
             "products": products,
             "initials": roster,
             "bays": bays,
+            "recipients": recipients,
+            "notify": {
+                "email_configured": notify_config.email_configured(),
+                "sms_configured": notify_config.sms_configured(),
+                "failures": notify.recent_failures(conn),
+            },
             "settings": {
                 "takeover_seconds": db.get_setting(conn, "takeover_seconds", 12),
                 "stale_delay_minutes": db.get_setting(conn, "stale_delay_minutes", 120),
@@ -639,6 +690,75 @@ def _register_admin_routes(app):
             return jsonify({"ok": False, "error": "Unknown area."}), 400
         auth.set_pin(conn, area, (p.get("pin") or "").strip())
         return jsonify({"ok": True})
+
+    # --- Delay-notification recipients -------------------------------------
+    @app.route("/api/admin/recipient", methods=["POST"])
+    @auth.require_area("admin")
+    def admin_recipient():
+        conn = get_db()
+        p = _body()
+        op = p.get("op")
+        if op == "add":
+            name = (p.get("name") or "").strip()
+            if not name:
+                return jsonify({"ok": False, "error": "Name required."}), 400
+            conn.execute(
+                "INSERT INTO recipients (name, email, phone, notify_email, notify_sms, "
+                "bay_scope, control_scope, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1);",
+                (name, (p.get("email") or "").strip() or None,
+                 _normalize_phone(p.get("phone")),
+                 1 if p.get("notify_email") else 0,
+                 1 if p.get("notify_sms") else 0,
+                 _clean_bay_scope(p.get("bay_scope")),
+                 "out" if p.get("control_scope") == "out" else "all"))
+        elif op == "update":
+            conn.execute(
+                "UPDATE recipients SET name = ?, email = ?, phone = ?, notify_email = ?, "
+                "notify_sms = ?, bay_scope = ?, control_scope = ? WHERE id = ?;",
+                ((p.get("name") or "").strip(),
+                 (p.get("email") or "").strip() or None,
+                 _normalize_phone(p.get("phone")),
+                 1 if p.get("notify_email") else 0,
+                 1 if p.get("notify_sms") else 0,
+                 _clean_bay_scope(p.get("bay_scope")),
+                 "out" if p.get("control_scope") == "out" else "all",
+                 p["id"]))
+        elif op in ("retire", "activate"):
+            # Soft-retire (active=0), never hard-delete, so the outbox audit trail
+            # can always be traced back to a recipient row.
+            conn.execute("UPDATE recipients SET active = ? WHERE id = ?;",
+                         (1 if op == "activate" else 0, p["id"]))
+        else:
+            return jsonify({"ok": False, "error": "Unknown op."}), 400
+        conn.commit()
+        return jsonify({"ok": True})
+
+    @app.route("/api/admin/recipient_test", methods=["POST"])
+    @auth.require_area("admin")
+    def admin_recipient_test():
+        # Send directly through the adapters (bypassing the outbox) so config can
+        # be confirmed before waiting for a real delay. Returns JSON (this admin
+        # is a JSON-driven page; it never full-page-navigates).
+        conn = get_db()
+        p = _body()
+        r = conn.execute("SELECT * FROM recipients WHERE id = ?;", (p.get("id"),)).fetchone()
+        if r is None:
+            return jsonify({"ok": False, "error": "No such recipient."}), 404
+        sent = []
+        try:
+            if r["notify_email"] and r["email"]:
+                notify.send_email_postmark(r["email"], "BayTracker test",
+                                           "Test alert — config OK.")
+                sent.append("email")
+            if r["notify_sms"] and r["phone"]:
+                notify.send_sms_twilio(r["phone"], "BayTracker test — config OK.")
+                sent.append("sms")
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+        if not sent:
+            return jsonify({"ok": False,
+                            "error": "No enabled channel with an address to test."}), 400
+        return jsonify({"ok": True, "sent": sent})
 
 
 # The WSGI entry point: waitress-serve ... app:app

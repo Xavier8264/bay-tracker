@@ -61,6 +61,7 @@
   function renderAll() {
     renderDivisions(); renderReasons(); renderProducts(); renderInitials();
     renderBays(); renderBreaks(); renderShifts(); renderOC(); fillSettings(); fillPins();
+    renderNotifyStatus(); renderRecipients();
     // reason division dropdown
     $("nr-div").innerHTML = `<option value="">—</option>` +
       data.divisions.filter(d => d.active).map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
@@ -175,6 +176,88 @@
     $("pin-admin-state").textContent = data.pins.admin_set ? "set" : "not set";
   }
 
+  // ---- Delay notifications: status banner + recipients ----
+  function bayName(id) {
+    const b = data.bays.find(x => x.id === id);
+    return b ? b.name : ("bay #" + id);
+  }
+  function recScope(r) {
+    const bays = r.bay_scope === "all"
+      ? "All bays"
+      : "Bays: " + r.bay_scope.split(",").filter(Boolean).map(id => bayName(+id)).join(", ");
+    const ctrl = r.control_scope === "out" ? "out-of-control only" : "all delays";
+    return bays + " · " + ctrl;
+  }
+  function renderNotifyStatus() {
+    const n = data.notify || {};
+    let html = "";
+    if (!n.email_configured) {
+      html += `<div class="confirm-note">✉ Email is <b>not configured</b> — set POSTMARK_TOKEN and
+        POSTMARK_FROM (in the data folder's <code>notify.env</code> or the service environment).
+        Alerts will queue and send automatically once it's set.</div>`;
+    }
+    const f = n.failures || [];
+    if (f.length) {
+      html += `<div class="confirm-note" style="border-color:#c0392b">⚠ <b>${f.length} notification(s)
+        failed to send.</b><ul style="margin:6px 0 0 18px">` +
+        f.slice(0, 10).map(x => `<li>${esc(x.channel)} → ${esc(x.destination)} — ${esc(x.last_error || "")}
+          <span class="hint">(${esc(x.created_at)})</span></li>`).join("") + `</ul></div>`;
+    }
+    $("notify-status").innerHTML = html;
+  }
+  function renderRecipients() {
+    $("recipients").innerHTML = data.recipients.map(r => {
+      const emailCell = r.notify_email && r.email ? esc(r.email) : '<span class="no-data">—</span>';
+      const smsCell = r.notify_sms && r.phone ? esc(r.phone) : '<span class="no-data">—</span>';
+      const canTest = (r.notify_email && r.email) || (r.notify_sms && r.phone);
+      return `<tr${r.active ? "" : ' style="opacity:.55"'}>
+        <td>${esc(r.name)}</td><td>${emailCell}</td><td>${smsCell}</td>
+        <td>${esc(recScope(r))}</td>
+        <td>${r.active ? "active" : '<span class="badge">retired</span>'}</td>
+        <td style="text-align:right">
+          <button class="btn" data-edit-rec='${JSON.stringify(r).replace(/'/g, "&#39;")}'>Edit</button>
+          ${canTest ? `<button class="btn" data-test-rec="${r.id}">Send test</button>` : ""}
+          <button class="btn" data-toggle-rec="${r.id}" data-op="${r.active ? "retire" : "activate"}">${r.active ? "Retire" : "Restore"}</button>
+        </td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="no-data">no recipients yet</td></tr>`;
+  }
+  function editRecipient(r) {
+    const all = r.bay_scope === "all";
+    const sel = new Set(all ? [] : r.bay_scope.split(",").filter(Boolean).map(Number));
+    const bayChecks = data.bays.map(b =>
+      `<label style="display:inline-block;min-width:96px"><input type="checkbox" class="rec-bay" value="${b.id}" ${sel.has(b.id) ? "checked" : ""} style="width:auto"> ${esc(b.name)}</label>`).join("");
+    openModal(`<h2>Edit recipient</h2>
+      <label>Name</label><input id="m-name" value="${esc(r.name)}">
+      <label>Email</label><input id="m-email" value="${esc(r.email || "")}">
+      <label>Phone (E.164, e.g. +14145551234)</label><input id="m-phone" value="${esc(r.phone || "")}">
+      <label style="margin-top:8px"><input type="checkbox" id="m-email-on" ${r.notify_email ? "checked" : ""} style="width:auto"> Send email</label>
+      <label><input type="checkbox" id="m-sms-on" ${r.notify_sms ? "checked" : ""} style="width:auto"> Send SMS</label>
+      <label style="margin-top:10px">Reason scope</label>
+      <select id="m-ctrl"><option value="all" ${r.control_scope !== "out" ? "selected" : ""}>All delays</option>
+        <option value="out" ${r.control_scope === "out" ? "selected" : ""}>Out-of-control only</option></select>
+      <label style="margin-top:10px"><input type="checkbox" id="m-bay-all" ${all ? "checked" : ""} style="width:auto"> All bays</label>
+      <div id="m-bays" style="margin-top:6px${all ? ";display:none" : ""}">${bayChecks}</div>
+      <div class="actions"><button id="x">Cancel</button><button class="primary" id="ok">Save</button></div>`);
+    $("m-bay-all").onchange = function () { $("m-bays").style.display = this.checked ? "none" : ""; };
+    $("x").onclick = closeModal;
+    $("ok").onclick = async () => {
+      const bayScope = $("m-bay-all").checked ? "all"
+        : Array.from(document.querySelectorAll(".rec-bay:checked")).map(c => +c.value);
+      await send("/api/admin/recipient", {
+        op: "update", id: r.id, name: $("m-name").value, email: $("m-email").value,
+        phone: $("m-phone").value, notify_email: $("m-email-on").checked,
+        notify_sms: $("m-sms-on").checked, bay_scope: bayScope, control_scope: $("m-ctrl").value
+      });
+      closeModal();
+    };
+  }
+  async function testRecipient(id) {
+    toast("Sending test…");
+    const r = await BT.post("/api/admin/recipient_test", { id });
+    if (r.ok) toast("Test sent ✓ (" + ((r.data.sent || []).join(" + ") || "—") + ")");
+    else alert((r.data && r.data.error) || "Test failed.");
+  }
+
   // ===== modal edit =====
   const backdrop = $("backdrop"), modal = $("modal");
   function openModal(html) { modal.innerHTML = html; backdrop.classList.add("show"); }
@@ -228,6 +311,9 @@
     description: $("np-desc").value, target_minutes: $("np-target").value || null });
   $("add-initials").onclick = () => send("/api/admin/initials", { op: "add", initials: $("ni-ini").value, name: $("ni-name").value });
   $("add-bay").onclick = () => send("/api/admin/bay", { op: "add_extra", name: $("nb-name").value, grid_col: $("nb-col").value || null });
+  $("add-recipient").onclick = () => send("/api/admin/recipient", { op: "add",
+    name: $("nrec-name").value, email: $("nrec-email").value, phone: $("nrec-phone").value,
+    notify_email: $("nrec-email-on").checked, notify_sms: $("nrec-sms-on").checked });
 
   $("save-layout").onclick = (e) => send("/api/admin/layout", {
     grid_cols: parseInt($("lay-cols").value, 10), standard_rows: parseInt($("lay-rows").value, 10),
@@ -346,6 +432,13 @@
     else if ((b = e.target.closest("[data-col-bay]"))) promptModal("Top-row column", "Column number", b.dataset.col,
       v => send("/api/admin/bay", { op: "set_col", id: +b.dataset.colBay, grid_col: parseInt(v, 10) || null }));
     else if ((b = e.target.closest("[data-toggle-bay]"))) send("/api/admin/bay", { op: b.dataset.op, id: +b.dataset.toggleBay });
+    else if ((b = e.target.closest("[data-edit-rec]"))) editRecipient(JSON.parse(b.dataset.editRec.replace(/&#39;/g, "'")));
+    else if ((b = e.target.closest("[data-test-rec]"))) testRecipient(+b.dataset.testRec);
+    else if ((b = e.target.closest("[data-toggle-rec]"))) {
+      const restoring = b.dataset.op === "activate";
+      if (restoring || confirm("Retire this recipient? They stop getting alerts; past send history is kept."))
+        send("/api/admin/recipient", { op: b.dataset.op, id: +b.dataset.toggleRec });
+    }
   });
 
   load();
