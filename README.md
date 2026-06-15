@@ -227,6 +227,55 @@ Health check for monitoring/updates: **`GET /healthz`** → `200 {"status":"ok"}
 
 ---
 
+## Delay notifications (email / SMS alerts)
+
+When a bay is flagged **DELAYED**, the system can email (and, in Phase 2, text) the right people
+automatically. Recipients are managed live on **`/admin → Delay notifications`** — no code change
+to add or remove someone.
+
+**How it stays reliable.** Logging a delay **never touches the network**: it only writes "pending"
+rows to a local outbox table. A background worker sends them and retries with backoff, so a wifi
+drop just delays an alert a few seconds instead of losing it (the same resilience principle as the
+rest of the app). Permanently failed sends surface in a banner on the admin page.
+
+**Routing.** Each recipient has per-channel on/off switches and a scope:
+
+- **Bay scope** — all bays, or only specific bays (a cell supervisor hears only their own).
+- **Reason scope** — all delays, or only **out-of-control** ones (e.g. a maintenance lead).
+
+### Setup (email / Phase 1)
+
+1. **Postmark account** — create one and **verify the sender** (signature, or better the sending
+   domain via DKIM). Nothing sends until this is done.
+2. **Credentials** — secrets live **outside the repo**, like the app's secret key. Create
+   `…\BayTrackerData\notify.env` (in your `BAYTRACKER_DATA` folder, never committed):
+
+   ```text
+   POSTMARK_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   POSTMARK_FROM=baytracker@yourcompany.com
+   DASHBOARD_URL=http://<PC-IP>:5000/dashboard
+   ```
+
+   (Or set the same names in the NSSM service environment alongside `BAYTRACKER_DATA`.)
+3. **Install deps** on the floor PC: `pip install -r requirements.txt` (adds `requests` +
+   `python-dotenv`), then restart the service.
+4. **Add recipients** in `/admin`, hit **Send test** to confirm Postmark, then flag a test delay —
+   the alert goes out within ~20 seconds.
+
+Until configured, the admin page shows an "email not configured" notice and queued alerts simply
+wait — they send automatically once the credentials are in place.
+
+### SMS (Phase 2)
+
+SMS is fully wired but stays dark until you're ready: complete your company's **A2P 10DLC
+registration**, add `TWILIO_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` to `notify.env`, and switch
+SMS on for the right recipients. Nothing structural changes.
+
+> **Phone format:** Twilio needs E.164 (`+1` then 10 digits). The admin form normalizes typed
+> numbers, so `(414) 555-1234` is stored as `+14145551234`.
+
+---
+
 ## Pin the address + point the displays
 
 1. **DHCP reservation:** reserve this PC's IP on your router so the address never changes.
@@ -399,8 +448,10 @@ requirements.txt  Exactly pinned dependencies
 baytracker/       Application package:
   config.py  db.py  bootstrap.py  schedule.py  events.py  state.py
   actions.py  exports.py  metrics.py  sse.py  auth.py  app_db.py
+  notify.py  notify_config.py   (delay email/SMS alerts)
 templates/        dashboard / console / stats / admin / unlock / base
 static/           css/  js/  vendor/chart.umd.min.js (vendored, offline)
+tests/            test_time_engine.py  test_notify.py  (standalone, no pytest)
 tools/            nssm.exe goes here (see tools/README.txt)
 ```
 
