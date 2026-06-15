@@ -93,10 +93,23 @@ if ($listener) {
     }
 }
 
-# --- 3b. Demo mode: generate the example dataset on first use -------------------
-if ($Demo -and -not (Test-Path (Join-Path $DataDir "baytracker.db"))) {
-    Write-Host "Generating demo dataset (first use)..." -ForegroundColor Yellow
-    & $venvPy (Join-Path $RepoDir "make_demo_data.py") --data-dir $DataDir
+# --- 3b. Demo mode: (re)generate the example dataset, anchored to NOW -----------
+# The demo's live times are counted from each open run's start up to "now", so a
+# demo left sitting for hours/days shows runs that have been "open" for 15-50+
+# hours -- nonsense for a pitch. The data is disposable and deterministic, so we
+# rebuild it on every -Demo launch, anchored to the moment you start the server.
+# Result: a freshly launched board always reads realistically (elapsed < 13h,
+# total < 16h). If a long-running demo drifts up during the day, just restart.
+if ($Demo) {
+    $demoDb = Join-Path $DataDir "baytracker.db"
+    if (Test-Path $demoDb) {
+        Write-Host "Refreshing demo dataset (anchored to now)..." -ForegroundColor Yellow
+    } else {
+        Write-Host "Generating demo dataset (first use)..." -ForegroundColor Yellow
+    }
+    $genArgs = @((Join-Path $RepoDir "make_demo_data.py"), "--data-dir", $DataDir)
+    if (Test-Path $demoDb) { $genArgs += "--fresh" }   # replace the existing demo file
+    & $venvPy $genArgs
     if ($LASTEXITCODE -ne 0) { throw "Demo data generation failed (see message above)." }
 }
 
