@@ -307,19 +307,35 @@ makes a reboot-after-crash always win the port).
 
 ## Backups
 
-The database file is the only irreplaceable asset — protect it.
+The database file is the only irreplaceable asset — protect it. The database survives code
+updates, service restarts, and Windows-update reboots untouched (it lives outside the repo in
+`BAYTRACKER_DATA`, in WAL mode, and startup is non-destructive), but that does **not** protect
+against a dead disk, ransomware, or a deleted folder — for that you need backups.
+
+**Easiest: register a daily backup at install time** (idempotent; re-run to change it):
 
 ```powershell
-# One-off / scheduled consistent backup (writes to BAYTRACKER_DATA\backups):
-powershell -ExecutionPolicy Bypass -File .\backup.ps1
+# Daily 02:00 consistent backup, as a SYSTEM scheduled task:
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -ScheduleBackup
 
-# Also copy off-machine to a network share:
-powershell -ExecutionPolicy Bypass -File .\backup.ps1 -Dest \\server\share\baytracker
+# ...and also copy each backup off-machine (strongly recommended):
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -ScheduleBackup -BackupDest "\\server\share\baytracker" -BackupTime 02:00
 ```
 
-Schedule it daily (Task Scheduler). You can also set a **backup network path** in `/admin`,
-which `backup.ps1` will copy to automatically. `update.ps1` always backs up before updating.
-The CSV/XLSX exports are a secondary safety net, **not** a substitute for copying the DB file.
+This creates a **"BayTracker Backup"** Task Scheduler job that runs `backup.ps1` (a consistent,
+WAL-aware online copy into `BAYTRACKER_DATA\backups`, plus the off-machine copy). It runs even
+if no one is logged in and catches up if the PC was off at the scheduled time.
+
+Run a backup by hand any time:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\backup.ps1                                  # local only
+powershell -ExecutionPolicy Bypass -File .\backup.ps1 -Dest \\server\share\baytracker  # + off-machine
+```
+
+You can also set a **backup network path** in `/admin`, which `backup.ps1` copies to automatically
+even without `-Dest`. `update.ps1` always backs up before updating. The CSV/XLSX exports are a
+secondary safety net, **not** a substitute for copying the DB file.
 
 ---
 

@@ -9,6 +9,7 @@
       4. Creates the database and seeds structural defaults (non-destructive).
       5. (Optional) Opens the firewall port.
       6. (Optional) Installs an auto-start, auto-restart Windows service via NSSM.
+      7. (Optional) Registers a daily database-backup scheduled task.
 
     IMPORTANT: the data folder must NOT be inside a OneDrive/Dropbox-synced
     location -- cloud sync corrupts live SQLite files. The default C:\BayTrackerData
@@ -19,7 +20,10 @@
       powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
       # Full production install (run an elevated PowerShell):
-      powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService
+      powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService -ScheduleBackup
+
+      # ...and also copy each backup off-machine to a share:
+      powershell -ExecutionPolicy Bypass -File .\setup.ps1 -ScheduleBackup -BackupDest "\\server\share\baytracker"
 #>
 param(
     [string]$DataDir = "C:\BayTrackerData",   # where the database + backups live (OFF OneDrive!)
@@ -27,7 +31,10 @@ param(
     [int]$Threads = 32,                         # waitress threads (>= number of TVs + console + headroom)
     [string]$ServiceName = "BayTracker",
     [switch]$OpenFirewall,                       # add the inbound firewall rule (needs admin)
-    [switch]$InstallService                      # install the NSSM auto-start service (needs admin)
+    [switch]$InstallService,                     # install the NSSM auto-start service (needs admin)
+    [switch]$ScheduleBackup,                     # register a daily DB-backup scheduled task (needs admin)
+    [string]$BackupDest = "",                    # optional off-machine copy target (e.g. \\server\share)
+    [string]$BackupTime = "02:00"                # daily backup time (HH:mm)
 )
 
 $ErrorActionPreference = "Stop"
@@ -115,6 +122,44 @@ if ($InstallService) {
     }
 }
 
+# --- 7. Daily database backup scheduled task (optional) ---------------------
+# The database is the only irreplaceable asset; updates/restarts can't corrupt
+# it (WAL + non-destructive startup), but a dead disk or deleted folder still
+# can. This registers a daily, consistent, off-machine-capable backup so there
+# is always a recent copy. Idempotent: re-running replaces the existing task.
+if ($ScheduleBackup) {
+    $taskName = "BayTracker Backup"
+    Write-Host "Registering scheduled daily backup '$taskName' at $BackupTime..."
+    try {
+        $backupPs1 = Join-Path $RepoDir "backup.ps1"
+        $destArg = if ($BackupDest) { " -Dest '$BackupDest'" } else { "" }
+        # Set BAYTRACKER_DATA inline so the task finds the right data folder even
+        # when it runs as SYSTEM (which doesn't see user-scope env vars).
+        $inner = "`$env:BAYTRACKER_DATA='$DataDir'; & '$backupPs1'$destArg"
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+            -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command `"$inner`""
+        $trigger = New-ScheduledTaskTrigger -Daily -At $BackupTime
+        # Run as SYSTEM, whether or not anyone is logged in; catch up if the PC
+        # was off at the scheduled time.
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings | Out-Null
+        Write-Host "Scheduled backup registered (daily $BackupTime, as SYSTEM)." -ForegroundColor Green
+        if ($BackupDest) {
+            Write-Host "  Off-machine copy -> $BackupDest"
+        } else {
+            Write-Host "  Local backups -> $DataDir\backups"
+            Write-Host "  Tip: also set an off-machine target with -BackupDest '\\server\share\baytracker'," -ForegroundColor Yellow
+            Write-Host "       or set 'Backup network path' in /admin -- the task copies there automatically." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Warning "Could not register the scheduled backup (needs an elevated PowerShell): $_"
+        Write-Warning "Run setup.ps1 again from an Administrator prompt, or schedule backup.ps1 by hand (see README)."
+    }
+}
+
 # --- Desktop shortcut (clickable launcher) ----------------------------------
 try {
     & (Join-Path $RepoDir "make_shortcut.ps1")
@@ -143,3 +188,9 @@ Write-Host ""
 Write-Host "NEXT: pin this PC's IP with a DHCP reservation so the address never changes,"
 Write-Host "      then open /admin and enter your real divisions, reasons, products, initials,"
 Write-Host "      and shift/break/operating times (they start empty on purpose)."
+if (-not $ScheduleBackup) {
+    Write-Host ""
+    Write-Warning "No automatic backup is scheduled. The database survives updates/restarts, but a"
+    Write-Warning "dead disk or deleted folder is unrecoverable without backups. Re-run with"
+    Write-Warning "-ScheduleBackup (ideally -BackupDest '\\server\share\baytracker') to set up a daily copy."
+}
