@@ -1,46 +1,95 @@
 <#
-    make_shortcut.ps1 -- put a clickable "Bay Tracker Server" icon on the
-    Desktop that launches the server (start.ps1) when double-clicked.
+    make_shortcut.ps1 -- put the Bay Tracker control icons on the Desktop.
 
-    Run it once from the installed repo folder:
+    Creates two clearly-labelled shortcuts, each with its own intuitive icon:
+
+      * "Start Bay Tracker Server"  (green play icon)   -> boot.ps1
+            Brings the server up (starts the Windows service if installed,
+            otherwise launches it in the foreground).
+
+      * "Update Bay Tracker"        (blue download icon) -> update_latest.ps1
+            Pulls the latest RELEASE from GitHub and deploys it safely
+            (backup -> migrate -> restart -> health-check -> auto-rollback).
+            Handy once you start pushing updates from your laptop.
+
+    setup.ps1 runs this for you. Re-run by hand any time (it overwrites in place):
         powershell -ExecutionPolicy Bypass -File .\make_shortcut.ps1
 
     Options:
-        -Dashboard   also drop a "Bay Tracker Dashboard" icon that opens the
-                     live board in the default browser (handy on the server PC).
+        -Dashboard   also drop a "Bay Tracker Dashboard" icon that opens the live
+                     board in the default browser (handy on the server PC).
 
-    Safe to re-run; it overwrites the shortcut in place. The launcher does NOT
-    need admin rights (only the one-time firewall rule did), so clicking it
-    never triggers a UAC prompt. The shortcut points at THIS repo's start.ps1,
-    so create it from the folder you actually run the server from
-    (e.g. C:\BayTracking).
+    Neither launcher needs admin rights, so clicking them never triggers a UAC
+    prompt. The shortcuts point at THIS repo's scripts, so create them from the
+    folder you actually run the server from (e.g. C:\BayTracking).
 #>
-param([switch]$Dashboard, [int]$Port = 5000)
+param(
+    [switch]$Dashboard,
+    [int]$Port = 5000,
+    [string]$ServiceName = "BayTracker"
+)
 
 $ErrorActionPreference = "Stop"
-$RepoDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$startPs1 = Join-Path $RepoDir "start.ps1"
-if (-not (Test-Path $startPs1)) { throw "start.ps1 not found next to make_shortcut.ps1 ($RepoDir)." }
+$RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+foreach ($f in @("boot.ps1", "update_latest.ps1")) {
+    if (-not (Test-Path (Join-Path $RepoDir $f))) { throw "$f not found next to make_shortcut.ps1 ($RepoDir)." }
+}
 
-$desktop = [Environment]::GetFolderPath("Desktop")
-$ws = New-Object -ComObject WScript.Shell
+# --- Make sure the icons exist (regenerate if a clone is missing them) -------
+$startIco  = Join-Path $RepoDir "assets\start.ico"
+$updateIco = Join-Path $RepoDir "assets\update.ico"
+if (-not (Test-Path $startIco) -or -not (Test-Path $updateIco)) {
+    try {
+        & (Join-Path $RepoDir "assets\make_icons.ps1")
+    } catch {
+        Write-Warning "Could not generate custom icons ($_). Falling back to a system icon."
+    }
+}
+# Fallback icon if the custom ones still aren't there for any reason.
+$fallbackIco = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+function Resolve-Icon([string]$ico) { if (Test-Path $ico) { "$ico,0" } else { "$fallbackIco,0" } }
 
-# --- the launcher shortcut -------------------------------------------------
-$lnkPath = Join-Path $desktop "Bay Tracker Server.lnk"
-$lnk = $ws.CreateShortcut($lnkPath)
-$lnk.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-# -NoExit keeps the window open so the URLs (and any "port in use" message) stay
-# readable; the server itself runs in the foreground in that window.
-$lnk.Arguments = "-NoExit -ExecutionPolicy Bypass -File `"$startPs1`""
-$lnk.WorkingDirectory = $RepoDir
-$venvPy = Join-Path $RepoDir "venv\Scripts\python.exe"
-if (Test-Path $venvPy) { $lnk.IconLocation = "$venvPy,0" }
-$lnk.Description = "Start the Bay Tracking server. Leave the window open; Ctrl+C stops it."
-$lnk.WindowStyle = 1
-$lnk.Save()
-Write-Host "Created: $lnkPath" -ForegroundColor Green
+$desktop  = [Environment]::GetFolderPath("Desktop")
+$ws       = New-Object -ComObject WScript.Shell
+$powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
-# --- optional: open-the-dashboard shortcut ---------------------------------
+function New-Launcher {
+    param([string]$Name, [string]$Script, [string]$Icon, [string]$Description)
+    $lnkPath = Join-Path $desktop "$Name.lnk"
+    $scriptPath = Join-Path $RepoDir $Script
+    $lnk = $ws.CreateShortcut($lnkPath)
+    $lnk.TargetPath = $powershell
+    # -NoExit keeps the window open so the URLs / result stay readable.
+    $lnk.Arguments = "-NoExit -ExecutionPolicy Bypass -File `"$scriptPath`" -Port $Port -ServiceName `"$ServiceName`""
+    $lnk.WorkingDirectory = $RepoDir
+    $lnk.IconLocation = (Resolve-Icon $Icon)
+    $lnk.Description = $Description
+    $lnk.WindowStyle = 1
+    $lnk.Save()
+    Write-Host "Created: $lnkPath" -ForegroundColor Green
+}
+
+# --- 1. Start the server -----------------------------------------------------
+New-Launcher -Name "Start Bay Tracker Server" -Script "boot.ps1" -Icon $startIco `
+    -Description "Start the Bay Tracking server (starts the service, or launches it in this window)."
+
+# --- 2. Update from GitHub ---------------------------------------------------
+New-Launcher -Name "Update Bay Tracker" -Script "update_latest.ps1" -Icon $updateIco `
+    -Description "Pull the latest release from GitHub and deploy it safely (backup + auto-rollback)."
+
+# --- Clean up the old single-purpose launcher from earlier versions ----------
+# Earlier installs created one launcher named either "Bay Tracker Server" or
+# "Bay Tracker Service"; remove it so there's no stale duplicate next to the new
+# "Start Bay Tracker Server" icon.
+foreach ($oldName in @("Bay Tracker Server.lnk", "Bay Tracker Service.lnk")) {
+    $legacy = Join-Path $desktop $oldName
+    if (Test-Path $legacy) {
+        Remove-Item $legacy -Force -ErrorAction SilentlyContinue
+        Write-Host "Removed old '$([System.IO.Path]::GetFileNameWithoutExtension($oldName))' shortcut (replaced by 'Start Bay Tracker Server')." -ForegroundColor DarkGray
+    }
+}
+
+# --- Optional: open-the-dashboard shortcut -----------------------------------
 if ($Dashboard) {
     $urlPath = Join-Path $desktop "Bay Tracker Dashboard.url"
     Set-Content -Path $urlPath -Encoding ASCII -Value @(
@@ -51,4 +100,6 @@ if ($Dashboard) {
 }
 
 Write-Host ""
-Write-Host "Double-click 'Bay Tracker Server' on the Desktop to start the server." -ForegroundColor Cyan
+Write-Host "Desktop icons ready:" -ForegroundColor Cyan
+Write-Host "    Start Bay Tracker Server   -- click to bring the server up"
+Write-Host "    Update Bay Tracker         -- click to pull the latest release from GitHub"

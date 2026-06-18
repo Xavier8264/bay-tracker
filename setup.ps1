@@ -160,11 +160,13 @@ if ($ScheduleBackup) {
     }
 }
 
-# --- Desktop shortcut (clickable launcher) ----------------------------------
+# --- Desktop shortcuts (clickable launchers) --------------------------------
+# Drops two labelled icons on the Desktop: "Start Bay Tracker Server" (boot the
+# server) and "Update Bay Tracker" (pull the latest release from GitHub).
 try {
-    & (Join-Path $RepoDir "make_shortcut.ps1")
+    & (Join-Path $RepoDir "make_shortcut.ps1") -Port $Port -ServiceName $ServiceName
 } catch {
-    Write-Warning "Could not create the desktop shortcut: $_"
+    Write-Warning "Could not create the desktop shortcuts: $_"
 }
 
 # --- Done: print the URLs ---------------------------------------------------
@@ -179,6 +181,10 @@ if (-not $InstallService) {
     Write-Host "To run the server now (foreground):"
     Write-Host "    powershell -ExecutionPolicy Bypass -File .\start.ps1" -ForegroundColor Yellow
 }
+Write-Host ""
+Write-Host "Desktop icons (created automatically):" -ForegroundColor Cyan
+Write-Host "    Start Bay Tracker Server   -- double-click to bring the server up"
+Write-Host "    Update Bay Tracker         -- double-click to pull the latest release from GitHub"
 Write-Host ""
 Write-Host "Point devices at:"
 Write-Host "    Dashboard (TVs):   http://${ipv4}:$Port/dashboard" -ForegroundColor Green

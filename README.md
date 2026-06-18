@@ -106,11 +106,18 @@ Leave that window open — the server is now running. Useful options:
 `-Port 8080` (serve elsewhere), `-Threads 64` (more screens; default 32 leaves headroom for
 one long-lived connection per TV + the console).
 
-**Prefer a clickable icon?** `setup.ps1` drops a **"Bay Tracker Server"** shortcut on the
-Desktop that launches the server when double-clicked (no admin prompt). Re-create it any time
-with `powershell -ExecutionPolicy Bypass -File .\make_shortcut.ps1` (add `-Dashboard` to also
-get an icon that opens the live board in a browser). For a server that should come back on its
-own after every reboot, install it as a service instead (see *Run it as a service*).
+**Prefer clickable icons?** `setup.ps1` drops two labelled shortcuts on the Desktop (no admin
+prompt, each with its own intuitive icon):
+
+- **▶ Start Bay Tracker Server** (green play) — brings the server up: starts the Windows service
+  if one is installed, otherwise launches it in the foreground (`boot.ps1`).
+- **⤓ Update Bay Tracker** (blue download) — pulls the latest **release** from GitHub and deploys
+  it the safe way (`update_latest.ps1` → `update.ps1`: backup → migrate → restart → health-check →
+  auto-rollback). Useful once you start pushing updates from your laptop — see *Updating safely*.
+
+Re-create them any time with `powershell -ExecutionPolicy Bypass -File .\make_shortcut.ps1`
+(add `-Dashboard` to also get an icon that opens the live board in a browser). For a server that
+should come back on its own after every reboot, install it as a service (see *Run it as a service*).
 
 <details>
 <summary>Manual launch (what start.ps1 runs for you)</summary>
@@ -352,6 +359,12 @@ powershell -ExecutionPolicy Bypass -File .\update.ps1 -Tag v1.1.0
 (4) installs pinned deps, (5) runs `migrate.py` (additive/idempotent), (6) restarts, (7) health-checks,
 and (8) **automatically rolls back** to the previous version if the health check fails.
 
+**One-click from the Desktop.** The **"Update Bay Tracker"** icon (created by `setup.ps1`) runs
+`update_latest.ps1`, which fetches GitHub, finds the newest release tag, shows you `current → new`,
+asks you to confirm, then runs the exact `update.ps1` flow above. It only moves between tagged
+releases (still never bare `main`), so the floor PC always lands on a known version. Run it by hand
+with `powershell -ExecutionPolicy Bypass -File .\update_latest.ps1` (add `-Yes` to skip the prompt).
+
 ---
 
 ## Day-to-day workflow: edit on your laptop, deploy on the floor PC
@@ -375,11 +388,16 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-**On the floor PC** (the permanent server):
+**On the floor PC** (the permanent server) — the simplest path is to double-click the
+**"Update Bay Tracker"** Desktop icon, which picks up the newest release tag and runs the safe
+update for you. The equivalent commands:
 
 ```powershell
 cd C:\BayTracking
-# The safe way -- backs up the DB first, health-checks, auto-rolls-back on failure:
+# One-click icon equivalent: newest release tag -> safe update (asks to confirm):
+powershell -ExecutionPolicy Bypass -File .\update_latest.ps1
+
+# Or name the tag explicitly -- backs up the DB first, health-checks, auto-rolls-back on failure:
 powershell -ExecutionPolicy Bypass -File .\update.ps1 -Tag v1.2.0
 
 # The quick way (small, low-risk changes): pull and restart.
@@ -456,9 +474,12 @@ init_db.py        Create + seed the DB (non-destructive)
 make_demo_data.py Build the separate, disposable DEMO database (start.ps1 -Demo)
 migrate.py        Forward-only, idempotent schema migrations
 backup_db.py      Consistent online backup of the DB
-setup.ps1         One-time install     update.ps1   Safe, reversible update
+setup.ps1         One-time install     update.ps1   Safe, reversible update (by tag)
 start.ps1         THE way to launch by hand (right venv, right data dir, port checks)
-make_shortcut.ps1 Creates a clickable "Bay Tracker Server" desktop launcher
+boot.ps1          "Start Bay Tracker Server" icon target (start service, or foreground)
+update_latest.ps1 "Update Bay Tracker" icon target (latest GitHub release -> update.ps1)
+make_shortcut.ps1 Creates the two labelled Desktop launchers (Start / Update)
+assets/           start.ico, update.ico + make_icons.ps1 (regenerates the shortcut icons)
 backup.ps1        Scheduled backup wrapper
 requirements.txt  Exactly pinned dependencies
 baytracker/       Application package:
