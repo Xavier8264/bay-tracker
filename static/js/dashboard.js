@@ -49,11 +49,20 @@
     }
 
     const es = effStatus(t);
-    const sub = [t.product_number, t.component_label].filter(Boolean).map(BT.escapeHtml).join(" · ");
+    // Product number is the primary read (most important on the floor); the work
+    // order drops to the subline. If a (legacy) record has no product number,
+    // fall back to the work order as the headline so the big line is never blank.
+    const hasProduct = !!t.product_number;
+    const primary = BT.escapeHtml(hasProduct ? t.product_number : t.work_order);
+    const primaryLabel = hasProduct ? "product" : "work order";
+    const subParts = [];
+    if (hasProduct) subParts.push(t.work_order);
+    if (t.component_label) subParts.push(t.component_label);
+    const sub = subParts.map(BT.escapeHtml).join(" · ");
     const parallel = t.occupies_two ? `<span class="parallel-chip">∥ 2 bays</span>` : "";
 
-    let body = `<div class="unit-label">work order</div>
-      <div class="unit-num">${BT.escapeHtml(t.work_order)}</div>
+    let body = `<div class="unit-label">${primaryLabel}</div>
+      <div class="unit-num">${primary}</div>
       ${sub ? `<div class="sub-line">${sub}</div>` : ""}
       ${parallel}`;
 
