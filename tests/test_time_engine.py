@@ -262,6 +262,24 @@ def test_merge_different_wo_live_times():
     conn.close()
 
 
+def test_bay_utilization_never_exceeds_100():
+    print("== bay utilization is a true percentage (never > 100%) ==")
+    from baytracker import metrics
+    conn = fresh_conn()
+    b1 = bay(conn, 1)
+    # A 4-hour run reported over a 1-hour window inside it. The OLD math summed
+    # the whole run's 240 min against 60 available -> 400%. Clamped occupancy is
+    # the 60 in-window minutes -> exactly 100%, the physical ceiling for one bay.
+    D2 = "2026-06-15"   # a clean day no other test touches (shared test DB)
+    events.append(conn, "START", ts=f"{D2} 10:00:00", bay_id=b1, work_order="UTIL", product_number="P")
+    events.append(conn, "UNIT_COMPLETE", ts=f"{D2} 14:00:00", work_order="UTIL")
+    stats = metrics.compute(conn, {"start": f"{D2} 10:00:00", "end": f"{D2} 11:00:00"})
+    util = {r["bay"]: r["utilization_pct"] for r in stats["bay_utilization"]}
+    check("bay 1 == 100% (full window, clamped)", util.get("Bay 1"), 100.0)
+    check("no bay exceeds 100%", float(max((v or 0) for v in util.values()) <= 100.0), 1.0)
+    conn.close()
+
+
 def test_event_timestamps_round_to_minute():
     print("== newly-logged events round to the nearest minute ==")
     from baytracker.events import round_to_minute
@@ -279,6 +297,7 @@ def test_event_timestamps_round_to_minute():
 def main():
     try:
         test_event_timestamps_round_to_minute()
+        test_bay_utilization_never_exceeds_100()
         test_schedule_breaks_and_offhours()
         test_shift_attribution()
         test_shift_windows()

@@ -82,17 +82,31 @@ def _delay_pareto(delays, key: str):
 
 
 def _bay_utilization(conn, runs, sched: Schedule, start_dt, end_dt):
-    """Occupied counted minutes / available operating minutes, per bay."""
+    """Occupied counted minutes / available operating minutes, per bay.
+
+    Occupancy is the wall-clock a bay physically held a unit (start -> end),
+    CLAMPED to the reporting window and measured through the operating calendar.
+    Clamping matters: without it, a long run reported over a short window (e.g.
+    the "this shift" preset) contributes its whole length against a sliver of
+    available time and the bay reads as >100% -- which is nonsense, since a bay
+    holds at most one unit at a time. Clamped occupancy can never exceed the
+    window's available minutes, so utilization is a true 0-100% figure (a final
+    cap guards against any legacy overlapping runs in an old log)."""
     available = sched.counted_seconds(start_dt, end_dt) / 60.0
     occupied = defaultdict(float)
     for run in runs:
-        if run.get("total_minutes") is not None:
-            occupied[run["bay"]] += run["total_minutes"]
+        started = events.parse_ts(run["started_at"])
+        # An open run is still occupying the bay right now -> count up to the
+        # window end; a closed run ends when it ended.
+        ended = events.parse_ts(run["ended_at"]) if run.get("ended_at") else end_dt
+        s, e = max(started, start_dt), min(ended, end_dt)
+        if e > s:
+            occupied[run["bay"]] += sched.counted_seconds(s, e) / 60.0
     bays = conn.execute("SELECT name FROM bays WHERE active = 1 ORDER BY is_extra, sort_order;").fetchall()
     rows = []
     for b in bays:
         used = round(occupied.get(b["name"], 0.0), 1)
-        pct = round((used / available) * 100, 1) if available > 0 else None
+        pct = round(min((used / available) * 100, 100.0), 1) if available > 0 else None
         rows.append({"bay": b["name"], "used_minutes": used, "utilization_pct": pct})
     return rows
 

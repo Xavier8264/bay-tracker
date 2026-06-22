@@ -106,18 +106,27 @@
     charts[canvasId] = new Chart(canvas, chartCfg);
   }
   const GRID = "#33414f", TICK = "#9fb0c0";
-  function bar(labels, data, label, color) {
+  // y-axis tick presets. "percent" suffixes a % (utilization is a 0-100% figure);
+  // "integer" forces whole-number steps (you can't complete a fractional unit).
+  const Y = {
+    percent: { color: TICK, callback: v => v + "%" },
+    integer: { color: TICK, precision: 0, stepSize: 1 },
+  };
+  // yKind: undefined (plain), "percent", or "integer". A percent axis also shows
+  // the % in the hover tooltip so the value reads the same everywhere.
+  function bar(labels, data, label, color, yKind) {
     return { type: "bar", data: { labels, datasets: [{ label, data, backgroundColor: color || "#4a86ff" }] },
-      options: { plugins: { legend: { display: false } },
+      options: { plugins: { legend: { display: false },
+          tooltip: yKind === "percent" ? { callbacks: { label: c => " " + c.parsed.y + "%" } } : {} },
         scales: { x: { ticks: { color: TICK }, grid: { color: GRID } },
-                  y: { beginAtZero: true, ticks: { color: TICK }, grid: { color: GRID } } } } };
+                  y: { beginAtZero: true, ticks: Y[yKind] || { color: TICK }, grid: { color: GRID } } } } };
   }
-  function line(labels, data, label) {
+  function line(labels, data, label, yKind) {
     return { type: "line", data: { labels, datasets: [{ label, data, borderColor: "#25b866",
         backgroundColor: "rgba(37,184,102,.2)", tension: .25, fill: true }] },
       options: { plugins: { legend: { display: false } },
         scales: { x: { ticks: { color: TICK }, grid: { color: GRID } },
-                  y: { beginAtZero: true, ticks: { color: TICK }, grid: { color: GRID } } } } };
+                  y: { beginAtZero: true, ticks: Y[yKind] || { color: TICK }, grid: { color: GRID } } } } };
   }
 
   // ---- main refresh -------------------------------------------------------
@@ -153,11 +162,11 @@
     const pd = s.delay_pareto_division;
     renderChart("c-pareto-div", bar(pd.map(x => x.label), pd.map(x => x.minutes), "Delay minutes", "#e6a417"), pd.length);
     const ut = s.bay_utilization.filter(x => x.utilization_pct != null);
-    renderChart("c-util", bar(ut.map(x => x.bay), ut.map(x => x.utilization_pct), "Utilization %", "#1f9d57"), ut.length);
+    renderChart("c-util", bar(ut.map(x => x.bay), ut.map(x => x.utilization_pct), "Utilization %", "#1f9d57", "percent"), ut.length);
     const cy = s.avg_cycle_by_product;
     renderChart("c-cycle", bar(cy.map(x => x.product_number), cy.map(x => x.avg_cycle_minutes), "Avg cycle (min)"), cy.length);
     const th = s.throughput;
-    renderChart("c-thru", line(th.map(x => x.day), th.map(x => x.units), "Units"), th.length);
+    renderChart("c-thru", line(th.map(x => x.day), th.map(x => x.units), "Units", "integer"), th.length);
 
     // Cost detail
     const cb = document.getElementById("cost-box");
