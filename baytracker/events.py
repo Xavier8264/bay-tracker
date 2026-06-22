@@ -32,9 +32,13 @@ EVENT_COLUMNS = [
 ]
 
 # Every recognised event type (spec section 3).
+#   PAUSE / RESUME (2026-06): park an occupied-but-unstaffed bay at a shift
+#   changeover. While paused, the bay's clocks freeze (active/cycle/elapsed/total
+#   all stop accruing, like a break) and no delay can be flagged on it.
 EVENT_TYPES = {
     "START", "MOVE", "COMPLETE_BAY", "MATE",
     "DELAY_START", "DELAY_CLEAR", "UNIT_COMPLETE", "SCRAP", "CORRECTION",
+    "PAUSE", "RESUME",
 }
 
 

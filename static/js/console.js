@@ -25,8 +25,10 @@
   function effStatus(t) { return t.status === "ON_BREAK" ? (t.paused_status || "IDLE") : t.status; }
 
   // ---- grid rendering (clickable) ----------------------------------------
-  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸", DONE: "✔" };
-  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE" };
+  // PAUSED gets the ⏸ glyph; ON BREAK uses ❚❚ so the two frozen states never
+  // read alike when both appear on the floor (a parked bay during a break).
+  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "❚❚", DONE: "✔", PAUSED: "⏸" };
+  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE", PAUSED: "PAUSED" };
 
   // Bottom-anchored time columns. Every occupied tile shows the unit's ELAPSED
   // (linear wall-clock) and TOTAL (time across every bay it has touched --
@@ -34,8 +36,10 @@
   // (elapsed · total · delayed). All tick while the plant clock is counting and
   // freeze on breaks/off-hours.
   function timeCols(t, delayed) {
-    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
-    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
+    // A parked bay's unit clocks are frozen -- don't advance them locally.
+    const accruing = effStatus(t) !== "PAUSED";
+    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, accruing));
+    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, accruing));
     let cols = `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
     cols += `<div class="tcol"><span class="tlabel">total</span><span class="tval">${total}</span></div>`;
     if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
@@ -72,10 +76,12 @@
       const d = t.delay || {};
       const cat = d.division ? `<span class="cat-chip">⚑ ${BT.escapeHtml(d.division)}</span>` : "";
       body += `<div class="delay-info"><div class="reason">${BT.escapeHtml(d.reason || "Delay")}</div>${cat}</div>`;
+    } else if (es === "PAUSED") {
+      body += `<div class="paused-note">Parked — unstaffed this shift · no alerts</div>`;
     }
 
-    // RUNNING / DONE / ON_BREAK — neutral body; status reads from the colored
-    // top band and the colored status word.
+    // RUNNING / DONE / ON_BREAK / PAUSED — neutral body; status reads from the
+    // colored top band and the colored status word.
     return `<div class="${cls}" data-bay="${t.bay_id}">
       ${head}
       <div class="tile-body">${body}</div>
@@ -120,8 +126,12 @@
   // ---- modal helpers ------------------------------------------------------
   const backdrop = document.getElementById("backdrop");
   const modal = document.getElementById("modal");
-  function openModal(html) { modal.innerHTML = html; backdrop.classList.add("show"); }
-  function closeModal() { backdrop.classList.remove("show"); modal.innerHTML = ""; }
+  function openModal(html, wide) {
+    modal.innerHTML = html;
+    modal.classList.toggle("wide", !!wide);
+    backdrop.classList.add("show");
+  }
+  function closeModal() { backdrop.classList.remove("show"); modal.innerHTML = ""; modal.classList.remove("wide"); }
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(); });
   function initialsField(id = "f-initials") {
     // Never pre-filled: each action requires the operator to enter their own
@@ -155,25 +165,39 @@
     // Any OTHER occupied bay can be a merge target (combine the two bays into
     // one continuing unit). Same-work-order bays are the usual case (two halves
     // of one unit); a different work order is allowed and confirmed in the modal.
+    // A parked (paused) bay is frozen, so it can't be a merge target.
     const mergeable = snap.tiles.filter(x => x.bay_id !== t.bay_id
-      && x.work_order && effStatus(x) !== "IDLE");
+      && x.work_order && effStatus(x) !== "IDLE" && effStatus(x) !== "PAUSED");
 
     const buttons = [];
-    if (st === "DELAYED") {
+    let allowMergeComplete = true;
+    if (st === "PAUSED") {
+      // Frozen/parked: resume to return it to monitoring (then act on it), or
+      // close the whole unit out. No move/merge/delay while parked.
+      buttons.push(`<button class="good" data-act="resume">▶ Resume bay</button>`);
+      buttons.push(`<button data-act="unit_complete">★ Unit complete</button>`);
+      allowMergeComplete = false;
+    } else if (st === "DELAYED") {
       buttons.push(`<button class="good" data-act="clear">✓ Clear delay</button>`);
       buttons.push(`<button data-act="move">→ Move to bay…</button>`);
     } else if (st === "DONE") {
-      // Work finished here; the part waits in the bay. It can only move onward.
+      // Work finished here; the part waits in the bay. It can move onward or be
+      // parked if this shift won't touch it.
       buttons.push(`<button data-act="move">→ Move to bay…</button>`);
+      buttons.push(`<button class="violet" data-act="pause">⏸ Pause bay (unstaff)</button>`);
     } else { // RUNNING
       buttons.push(`<button class="danger" data-act="delay">⚠ Flag delay</button>`);
       buttons.push(`<button data-act="move">→ Move to bay…</button>`);
       buttons.push(`<button class="warn" data-act="complete">✓ Work done at bay (stays here)</button>`);
+      buttons.push(`<button class="violet" data-act="pause">⏸ Pause bay (unstaff)</button>`);
     }
-    if (mergeable.length) buttons.push(`<button data-act="merge">⚯ Merge into bay…</button>`);
-    buttons.push(`<button data-act="unit_complete">★ Unit complete</button>`);
+    if (allowMergeComplete) {
+      if (mergeable.length) buttons.push(`<button data-act="merge">⚯ Merge into bay…</button>`);
+      buttons.push(`<button data-act="unit_complete">★ Unit complete</button>`);
+    }
 
-    const stLabel = st === "DONE" ? "done — awaiting next step" : st;
+    const stLabel = st === "DONE" ? "done — awaiting next step"
+      : st === "PAUSED" ? "paused — unstaffed this shift" : st;
     openModal(`<h2>${BT.escapeHtml(t.name)} — ${BT.escapeHtml(t.work_order)}</h2>
       <div class="sub">${BT.escapeHtml(t.product_number || "")} · ${stLabel}${t.component_label ? " · " + BT.escapeHtml(t.component_label) : ""}</div>
       <div class="action-menu">${buttons.join("")}</div>
@@ -193,6 +217,14 @@
       `The part stays in the bay (amber) until you move, merge, or complete the whole unit.`,
       (btn, ini) => doAction({ action: "complete_bay", bay_id: t.bay_id, initials: ini }, btn));
     if (act === "merge") return mergeModal(t, mergeable || []);
+    if (act === "pause") return confirmModal("Pause bay",
+      `Park <b>${BT.escapeHtml(t.name)}</b> (${BT.escapeHtml(t.work_order)})? Its clock freezes ` +
+      `and it raises no alerts until someone resumes it — for a bay this shift won't work.`,
+      (btn, ini) => doAction({ action: "pause_bay", bay_id: t.bay_id, initials: ini }, btn));
+    if (act === "resume") return confirmModal("Resume bay",
+      `Resume <b>${BT.escapeHtml(t.name)}</b> (${BT.escapeHtml(t.work_order)})? It returns to ` +
+      `normal monitoring and its clock continues where it left off.`,
+      (btn, ini) => doAction({ action: "resume_bay", bay_id: t.bay_id, initials: ini }, btn));
     if (act === "unit_complete") return confirmModal("Unit complete",
       `Mark work order <b>${BT.escapeHtml(t.work_order)}</b> as fully complete? This ends its journey.`,
       (btn, ini) => doAction({ action: "unit_complete", work_order: t.work_order, initials: ini }, btn));
@@ -347,11 +379,105 @@
     document.getElementById("yes").onclick = (e) => onYes(e.target, enteredInitials());
   }
 
+  // ---- Shift changeover: one screen to staff/park the whole floor ---------
+  // Pre-filled from the current floor: every occupied bay is staffed unless it
+  // is already parked. Uncheck a bay to pause it (clock freezes, no alerts);
+  // re-check a parked bay to resume it. Confirm logs only the bays that changed.
+  function shiftChangeoverModal() {
+    const snap = BT.getSnapshot(); if (!snap) return;
+    const cols = cfg.layout.grid_cols || 4;
+    const allTiles = snap.tiles || [];
+    const standard = allTiles.filter(t => !t.is_extra);
+    // Extra top-row bays are staffed here only when they're enabled on the board,
+    // so the pop-up mirrors exactly what the floor shows.
+    const extras = cfg.layout.extras_enabled ? allTiles.filter(t => t.is_extra) : [];
+    const showExtrasRow = extras.length > 0;
+    const tiles = extras.concat(standard);   // full staffable set (order-agnostic)
+    const occupied = t => effStatus(t) !== "IDLE";
+
+    const staffed = {};   // bay_id -> desired staffed?  (occupied bays only)
+    const seed = () => tiles.forEach(t => {
+      if (occupied(t)) staffed[t.bay_id] = effStatus(t) !== "PAUSED";
+    });
+    seed();
+
+    const badge = snap.shift ? `<span class="sc-badge">${BT.escapeHtml(snap.shift)}</span>` : "";
+
+    function cellHTML(t) {
+      const n = BT.escapeHtml(t.name.replace(/^Bay\s*/i, ""));
+      if (!occupied(t)) {
+        return `<div class="sc-cell idle"><span class="sc-num">${n}</span>
+          <span class="sc-empty">empty</span></div>`;
+      }
+      const on = !!staffed[t.bay_id];
+      const num = BT.escapeHtml(t.product_number || t.work_order || t.name);
+      return `<div class="sc-cell ${on ? "staffed" : "paused"}" data-bay="${t.bay_id}">
+        <span class="sc-box">${on ? "✓" : ""}</span>
+        <span class="sc-num">${num}</span><span class="sc-cap">${n}</span></div>`;
+    }
+
+    function render() {
+      const grid = document.getElementById("sc-grid");
+      grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      let html = "";
+      if (showExtrasRow) {
+        // Mirror the board: a top row with each extra bay in its chosen column.
+        for (let c = 1; c <= cols; c++) {
+          const ex = extras.find(e => e.grid_col === c);
+          html += ex ? cellHTML(ex) : `<div class="sc-cell blank"></div>`;
+        }
+      }
+      html += standard.map(cellHTML).join("");
+      grid.innerHTML = html;
+      grid.querySelectorAll(".sc-cell[data-bay]").forEach(c => c.onclick = () => {
+        const id = parseInt(c.dataset.bay, 10);
+        staffed[id] = !staffed[id];
+        render();
+      });
+      let s = 0, p = 0;
+      Object.keys(staffed).forEach(k => (staffed[k] ? s++ : p++));
+      document.getElementById("sc-counts").innerHTML =
+        `<b>${s}</b> staffed · <b class="sc-pa">${p}</b> paused`;
+    }
+
+    openModal(`<div class="sc-head"><h2>Staffed bays this shift</h2>${badge}</div>
+      <div class="sub">Pre-filled from the current floor — uncheck a bay to <b>pause</b> it
+        (clock freezes, no alerts). It stays parked until someone resumes it.</div>
+      <div class="sc-legend">
+        <span><span class="sc-key staffed">✓</span> Staffed — normal alerts</span>
+        <span><span class="sc-key paused">⏸</span> Paused — no delay alerts</span>
+      </div>
+      <div id="sc-grid" class="sc-grid"></div>
+      <div class="sc-floor">▲ front of shop — grid mirrors the floor</div>
+      <div class="sc-foot"><span id="sc-counts"></span>
+        <span class="sc-reset" id="sc-reset">↺ Reset to current</span></div>
+      ${initialsField()}${errEl()}
+      <div class="actions"><button id="cancel">Cancel</button>
+        <button class="primary" id="go">Confirm &amp; start shift</button></div>`, true);
+    document.getElementById("cancel").onclick = closeModal;
+    document.getElementById("sc-reset").onclick = () => { seed(); render(); };
+    render();
+
+    document.getElementById("go").onclick = (e) => {
+      const pause = [], resume = [];
+      tiles.forEach(t => {
+        if (!occupied(t)) return;
+        const wasPaused = effStatus(t) === "PAUSED";
+        const want = !!staffed[t.bay_id];
+        if (want && wasPaused) resume.push(t.bay_id);
+        if (!want && !wasPaused) pause.push(t.bay_id);
+      });
+      if (!pause.length && !resume.length) return closeModal();  // nothing to log
+      doAction({ action: "shift_changeover", pause, resume, initials: enteredInitials() }, e.target);
+    };
+  }
+
   // ---- wire up clicks -----------------------------------------------------
   document.getElementById("grid").addEventListener("click", e => {
     const tile = e.target.closest(".tile.clickable");
     if (tile) openBay(parseInt(tile.dataset.bay, 10));
   });
+  document.getElementById("shift-btn").onclick = shiftChangeoverModal;
 
   // ---- boot ---------------------------------------------------------------
   loadConfig().then(() => {

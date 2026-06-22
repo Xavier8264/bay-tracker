@@ -297,6 +297,13 @@ def _dispatch_action(conn, name, p):
                                   p.get("note"), p.get("initials"))
     if name == "clear_delay":
         return actions.clear_delay(conn, int(p["bay_id"]), p.get("initials"))
+    if name == "pause_bay":
+        return actions.pause_bay(conn, int(p["bay_id"]), p.get("initials"))
+    if name == "resume_bay":
+        return actions.resume_bay(conn, int(p["bay_id"]), p.get("initials"))
+    if name == "shift_changeover":
+        return actions.shift_changeover(conn, p.get("pause"), p.get("resume"),
+                                        p.get("initials"))
     if name == "unit_complete":
         return actions.unit_complete(conn, p.get("work_order"), p.get("initials"))
     raise ActionError("Unknown action.")

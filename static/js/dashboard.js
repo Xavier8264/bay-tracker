@@ -18,8 +18,10 @@
   }
 
   // ---- grid rendering -----------------------------------------------------
-  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸", DONE: "✔" };
-  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE" };
+  // PAUSED gets the ⏸ glyph; ON BREAK uses ❚❚ so the two frozen states never
+  // read alike when both are on the board at once (a parked bay during a break).
+  const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "❚❚", DONE: "✔", PAUSED: "⏸" };
+  const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE", PAUSED: "PAUSED" };
 
   // A bay's effective status (a bay on break still reflects its underlying run).
   function effStatus(t) { return t.status === "ON_BREAK" ? (t.paused_status || "IDLE") : t.status; }
@@ -30,8 +32,10 @@
   // Columns sit at the tile bottom (CSS margin-top:auto) so the labels line up
   // across the whole grid.
   function timeCols(t, delayed) {
-    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
-    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
+    // A parked bay's unit clocks are frozen -- don't advance them locally.
+    const accruing = effStatus(t) !== "PAUSED";
+    const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, accruing));
+    const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, accruing));
     let cols = `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
     cols += `<div class="tcol"><span class="tlabel">total</span><span class="tval">${total}</span></div>`;
     if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
@@ -69,10 +73,12 @@
       const d = t.delay || {};
       const cat = d.division ? `<span class="cat-chip">⚑ ${BT.escapeHtml(d.division)}</span>` : "";
       body += `<div class="delay-info"><div class="reason">${BT.escapeHtml(d.reason || "Delay")}</div>${cat}</div>`;
+    } else if (es === "PAUSED") {
+      body += `<div class="paused-note">Parked — unstaffed this shift</div>`;
     }
 
-    // RUNNING / DONE / ON_BREAK — all share the neutral body; status reads from
-    // the colored top band and the colored status word.
+    // RUNNING / DONE / ON_BREAK / PAUSED — all share the neutral body; status
+    // reads from the colored top band and the colored status word.
     return `<div class="${cls} clickable" data-bay="${t.bay_id}">
       ${head}
       <div class="tile-body">${body}</div>
@@ -82,21 +88,26 @@
   // ---- live status counts + clock in the kiosk header --------------------
   function renderHeader(snap) {
     const el = document.getElementById("kh-status"); if (!el) return;
-    let running = 0, delayed = 0, done = 0, idle = 0;
+    let running = 0, delayed = 0, done = 0, paused = 0, idle = 0;
     (snap.tiles || []).forEach(t => {
       const s = effStatus(t);
       if (s === "DELAYED") delayed++;
       else if (s === "DONE") done++;
+      else if (s === "PAUSED") paused++;
       else if (s === "IDLE") idle++;
       else running++;
     });
     const clock = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     const dot = c => `<span class="kh-dot" style="background:${c}"></span>`;
     const demo = snap.demo_mode ? `<span class="demo-tag show">DEMO DATA</span>` : "";
+    // Paused only appears once at least one bay is parked, so the common board
+    // stays uncluttered.
+    const pausedCount = paused ? `<span class="kh-count">${dot("#8b78e6")}${paused} Paused</span>` : "";
     el.innerHTML =
       `<span class="kh-count">${dot("#2bb56e")}${running} Running</span>` +
       `<span class="kh-count">${dot("#D23B3B")}${delayed} Delayed</span>` +
       `<span class="kh-count">${dot("#e3ab33")}${done} Done</span>` +
+      pausedCount +
       `<span class="kh-count muted">${dot("#3a4450")}${idle} Idle</span>` +
       demo +
       `<span class="kh-clock">${clock}</span>`;
@@ -162,6 +173,12 @@
         ["Delay reason", d.reason], ["Division", d.division],
         ["In/Out of control", d.in_out_of_control], ["Flagged by", d.flagged_by],
         ["Delay note", d.note],
+      ]);
+    }
+    if (t.paused) {
+      rows = rows.concat([
+        ["Paused since", (t.paused.since || "").slice(11, 16)],
+        ["Paused by", t.paused.paused_by],
       ]);
     }
     const body = rows.filter(r => r[1]).map(r =>

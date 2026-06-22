@@ -64,6 +64,24 @@ class DelayEpisode:
         return self.cleared is None
 
 
+class PauseEpisode:
+    """One pause->resume interval on a bay run: the bay was parked/unstaffed
+    (e.g. across a short-staffed shift). While paused the bay's clocks freeze,
+    exactly like a scheduled break, so nobody is credited with work that wasn't
+    done. It is NOT a delay -- it is never red and raises no alerts."""
+
+    def __init__(self, started, paused_by, start_event_id):
+        self.started: datetime = started
+        self.resumed: Optional[datetime] = None
+        self.paused_by = paused_by
+        self.resumed_by: Optional[str] = None
+        self.start_event_id = start_event_id
+
+    @property
+    def is_open(self) -> bool:
+        return self.resumed is None
+
+
 class BayRun:
     """One period during which a unit occupied one bay."""
 
@@ -86,6 +104,8 @@ class BayRun:
         self.start_event_id = start_event_id
         self.delays: List[DelayEpisode] = []
         self.current_delay: Optional[DelayEpisode] = None
+        self.pauses: List[PauseEpisode] = []
+        self.current_pause: Optional[PauseEpisode] = None
 
     @property
     def is_open(self) -> bool:
@@ -95,6 +115,8 @@ class BayRun:
     def status(self) -> str:
         if not self.is_open:
             return "CLOSED"
+        if self.current_pause:
+            return "PAUSED"        # parked/unstaffed; clocks frozen (not a delay)
         if self.current_delay:
             return "DELAYED"
         if self.work_done_at is not None:
@@ -114,13 +136,25 @@ class BayRun:
         # may be later than work-done.
         return (self.started, self.ended or fallback_end)
 
+    def occupied_intervals(self, fallback_end: datetime) -> List[Interval]:
+        """Occupancy with paused (frozen) time removed -- what the unit's TOTAL
+        (summed bay occupancy) should count. A parked bay holds the part but its
+        clock is frozen, so the paused span is not 'taken-up' time."""
+        return _subtract([self.occupied_interval(fallback_end)],
+                         self.paused_intervals(fallback_end))
+
     def delayed_intervals(self, fallback_end: datetime) -> List[Interval]:
         return [(d.started, d.cleared or fallback_end) for d in self.delays]
 
+    def paused_intervals(self, fallback_end: datetime) -> List[Interval]:
+        return [(p.started, p.resumed or fallback_end) for p in self.pauses]
+
     def running_intervals(self, fallback_end: datetime) -> List[Interval]:
-        """Active (RUNNING) time = from start to work-done/end, minus delays."""
+        """Active (RUNNING) time = from start to work-done/end, minus delays and
+        minus paused (parked) time -- a parked bay accrues no active time."""
         return _subtract([(self.started, self._active_end(fallback_end))],
-                         self.delayed_intervals(fallback_end))
+                         self.delayed_intervals(fallback_end)
+                         + self.paused_intervals(fallback_end))
 
 
 class UnitJourney:
@@ -197,6 +231,20 @@ def counted_over(sched: Schedule, intervals: List[Interval]) -> float:
     return sum(sched.counted_seconds(s, e) for s, e in merge_intervals(intervals))
 
 
+def _unit_frozen_intervals(unit_runs: List["BayRun"], end: datetime) -> List[Interval]:
+    """The spans during which the WHOLE unit was parked (paused) and so its
+    linear clock (elapsed / cycle) must freeze. A unit is frozen only while it
+    has no bay actively running -- so if one of two parallel bays is paused but
+    the other still runs, the unit keeps ticking. For the common single-bay case
+    this is simply that bay's paused intervals."""
+    paused_all: List[Interval] = []
+    running_all: List[Interval] = []
+    for r in unit_runs:
+        paused_all += r.paused_intervals(end)
+        running_all += r.running_intervals(end)
+    return _subtract(merge_intervals(paused_all), merge_intervals(running_all))
+
+
 # ---------------------------------------------------------------------------
 # Effective-timestamp handling for corrections.
 # ---------------------------------------------------------------------------
@@ -245,6 +293,10 @@ def replay(conn) -> ReplayResult:
             run.current_delay.cleared = when
             run.current_delay.cleared_by = by
             run.current_delay = None
+        if run.current_pause:                 # ...and any open pause
+            run.current_pause.resumed = when
+            run.current_pause.resumed_by = by
+            run.current_pause = None
         result.bay_current.pop(run.bay_id, None)
         u = result.units.get(run.work_order)
         if u:
@@ -350,6 +402,26 @@ def replay(conn) -> ReplayResult:
                 run.current_delay.cleared_by = r["initials"]
                 run.current_delay = None
 
+        elif etype == "PAUSE":
+            run = result.bay_current.get(bay)
+            if run and run.is_open and run.current_pause is None:
+                # Parking a bay also ends any open delay -- it's no longer being
+                # worked, so it can't still be "delayed". Active stops here.
+                if run.current_delay:
+                    run.current_delay.cleared = when
+                    run.current_delay.cleared_by = r["initials"]
+                    run.current_delay = None
+                ep = PauseEpisode(when, r["initials"], r["id"])
+                run.pauses.append(ep)
+                run.current_pause = ep
+
+        elif etype == "RESUME":
+            run = result.bay_current.get(bay)
+            if run and run.current_pause:
+                run.current_pause.resumed = when
+                run.current_pause.resumed_by = r["initials"]
+                run.current_pause = None
+
         elif etype in ("UNIT_COMPLETE", "SCRAP"):
             # Terminal: close every bay this unit still occupies, then mark outcome.
             u = result.units.get(wo)
@@ -418,7 +490,11 @@ def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     active = counted_over(sched, running_all)
     delay = counted_over(sched, _subtract(merge_intervals(delayed_all),
                                           merge_intervals(running_all)))
-    cycle = sched.counted_seconds(unit.first_started, end)
+    # Cycle is the linear span from first start to end, MINUS the time the unit
+    # was parked (frozen) -- otherwise that frozen time would be miscounted as
+    # queue. Parked time is non-counting, exactly like a break.
+    frozen = _unit_frozen_intervals(unit_runs, end)
+    cycle = counted_over(sched, _subtract([(unit.first_started, end)], frozen))
     queue = max(0.0, cycle - active - delay)
     return {"active": active, "delay": delay, "queue": queue, "cycle": cycle}
 
@@ -445,16 +521,19 @@ def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     end = unit.completed or now
     # The survivor's own work order plus any work orders merged into it.
     work_orders = {unit.work_order, *unit.absorbed_work_orders}
+    unit_runs = [r for r in runs if r.work_order in work_orders]
     total = 0.0
     earliest = unit.first_started
-    for r in runs:
-        if r.work_order not in work_orders:
-            continue
-        s, e = r.occupied_interval(end)
-        total += sched.counted_seconds(s, e)
+    for r in unit_runs:
+        # Occupancy with parked (frozen) spans removed -- a paused bay holds the
+        # part but stops adding to the unit's taken-up time.
+        total += counted_over(sched, r.occupied_intervals(end))
         if r.started < earliest:
             earliest = r.started
-    elapsed = sched.counted_seconds(earliest, end)
+    # Linear elapsed, minus the spans the whole unit was parked, so a paused bay
+    # freezes the tile's elapsed clock just like its active clock.
+    frozen = _unit_frozen_intervals(unit_runs, end)
+    elapsed = counted_over(sched, _subtract([(earliest, end)], frozen))
     return elapsed, total
 
 
@@ -530,6 +609,7 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
             "elapsed_seconds": 0,
             "started_by": None,
             "delay": None,
+            "paused": None,          # {since, paused_by} when this bay is parked
             "paused_status": None,   # what the bay would be if not for the break
             "occupies_two": False,
             # Unit-level live times (counted seconds). elapsed = parallel-aware
@@ -563,14 +643,23 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
                     "since": _fmt(d.started),
                     "flagged_by": d.flagged_by,
                 }
-            else:  # RUNNING or DONE -> show this bay's active time so far
+            else:  # RUNNING / DONE / PAUSED -> show this bay's active time so far
+                # For a parked bay this is the active time accrued BEFORE it was
+                # paused (running_intervals already excludes the paused span), so
+                # the tile shows how far the work got before it was set aside.
                 tile["elapsed_seconds"] = int(
                     counted_over(sched, run.running_intervals(now)))
 
-            # During a break window, every occupied bay shows the distinct ON
-            # BREAK state (timers frozen). We keep the underlying status so the
-            # tile can hint what it will return to, but ON BREAK is never red.
-            if on_break is not None:
+            if underlying == "PAUSED":
+                p = run.current_pause
+                tile["paused"] = {"since": _fmt(p.started), "paused_by": p.paused_by}
+
+            # A parked bay always reads PAUSED -- it is a deliberate per-bay state
+            # that outranks the floor-wide ON BREAK. Otherwise, during a break
+            # window every occupied bay shows the distinct ON BREAK state (timers
+            # frozen); we keep the underlying status as a hint of what it returns
+            # to. Neither ON BREAK nor PAUSED is ever red.
+            if on_break is not None and underlying != "PAUSED":
                 tile["status"] = "ON_BREAK"
                 tile["paused_status"] = underlying
             else:
@@ -598,6 +687,9 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
         "demo_mode": bool(db.get_setting(conn, "demo_mode", False)),
         "is_counting": counting,
         "off_hours": off_hours,
+        # The shift the current moment falls in (None if no shifts configured) --
+        # the console's shift-changeover pop-up shows it as a badge.
+        "shift": sched.shift_for(now),
         "on_break": ({"label": on_break["label"], "ends_at": _fmt(on_break["ends_at"])}
                      if on_break else None),
         "tiles": tiles,

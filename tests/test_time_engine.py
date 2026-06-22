@@ -209,6 +209,45 @@ def test_complete_bay_keeps_part_in_bay():
     conn.close()
 
 
+def test_pause_freezes_clock():
+    print("== a paused (parked) bay freezes active/cycle/elapsed/total, like a break ==")
+    conn = fresh_conn()
+    b1 = bay(conn, 1)
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b1, work_order="PZ", product_number="P")
+    events.append(conn, "PAUSE", ts=f"{DAY} 10:30:00", bay_id=b1, work_order="PZ")
+    # During the pause (at 11:00) every clock is frozen at the 30m mark.
+    snap = state.live_snapshot(conn, now=T("11:00"))
+    tile = next(t for t in snap["tiles"] if t["bay_id"] == b1)
+    check("tile reads PAUSED", float(tile["status"] == "PAUSED"), 1.0)
+    check("active frozen at 30m", tile["elapsed_seconds"] / 60.0, 30)
+    check("unit elapsed frozen at 30m", tile["unit_elapsed_seconds"] / 60.0, 30)
+    check("unit total frozen at 30m", tile["unit_total_seconds"] / 60.0, 30)
+    # Resume at 12:00 (90m parked), finish at 12:30.
+    events.append(conn, "RESUME", ts=f"{DAY} 12:00:00", bay_id=b1, work_order="PZ")
+    events.append(conn, "UNIT_COMPLETE", ts=f"{DAY} 12:30:00", work_order="PZ")
+    d = unit_durs(conn, "PZ")
+    check("active 60m (10:00-10:30 + 12:00-12:30; pause excluded)", d["active"] / 60, 60)
+    check("cycle 60m (90m pause is non-counting, not queue)", d["cycle"] / 60, 60)
+    check("queue 0m (pause is not waiting)", d["queue"] / 60, 0)
+    conn.close()
+
+
+def test_pause_ends_open_delay():
+    print("== pausing a delayed bay ends the delay at pause time ==")
+    conn = fresh_conn()
+    b1 = bay(conn, 1)
+    events.append(conn, "START", ts=f"{DAY} 09:00:00", bay_id=b1, work_order="PD", product_number="P")
+    events.append(conn, "DELAY_START", ts=f"{DAY} 09:20:00", bay_id=b1, work_order="PD", reason_label="R")
+    events.append(conn, "PAUSE", ts=f"{DAY} 09:50:00", bay_id=b1, work_order="PD")
+    r = state.replay(conn)
+    run = r.bay_current[b1]
+    check("bay is paused", float(run.current_pause is not None), 1.0)
+    check("no delay left open", float(run.current_delay is None), 1.0)
+    check("the delay closed at pause time (30m)",
+          state.counted_over(Schedule.from_settings(conn), run.delayed_intervals(T("11:00"))) / 60, 30)
+    conn.close()
+
+
 def test_merge_total_vs_elapsed():
     print("== merged unit: total (summed bays) exceeds elapsed (union) ==")
     conn = fresh_conn()
@@ -306,6 +345,8 @@ def main():
         test_queue_time()
         test_multi_bay_parallel_journey()
         test_complete_bay_keeps_part_in_bay()
+        test_pause_freezes_clock()
+        test_pause_ends_open_delay()
         test_merge_total_vs_elapsed()
         test_merge_different_work_orders()
         test_merge_different_wo_live_times()

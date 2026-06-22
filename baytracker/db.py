@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS events (
     -- For a CORRECTION this is when the correction was made (not the time
     -- being corrected -- that goes in corrected_ts).
     ts                  TEXT    NOT NULL,
-    type                TEXT    NOT NULL,   -- START|MOVE|COMPLETE_BAY|MATE|DELAY_START|DELAY_CLEAR|UNIT_COMPLETE|SCRAP|CORRECTION
+    type                TEXT    NOT NULL,   -- START|MOVE|COMPLETE_BAY|MATE|DELAY_START|DELAY_CLEAR|PAUSE|RESUME|UNIT_COMPLETE|SCRAP|CORRECTION
     bay_id              INTEGER,            -- bay this event concerns (source bay for MOVE; continuing bay for MATE)
     target_bay_id       INTEGER,            -- MOVE: destination bay.  MATE: the bay being released/freed.
     work_order          TEXT,               -- TEXT to preserve leading zeros

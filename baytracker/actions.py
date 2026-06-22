@@ -165,6 +165,8 @@ def flag_delay(conn, bay_id, reason_id, note, initials):
     run = r.bay_current.get(bay_id)
     if run is None:
         raise ActionError("That bay isn't running, so it can't be delayed.")
+    if run.current_pause is not None:
+        raise ActionError("That bay is paused. Resume it before flagging a delay.")
     if run.current_delay is not None:
         raise ActionError("That bay is already flagged as delayed.")
 
@@ -196,6 +198,78 @@ def clear_delay(conn, bay_id, initials):
     row = events.append(conn, "DELAY_CLEAR", bay_id=bay_id, work_order=run.work_order,
                         product_number=run.product_number, initials=who)
     return _finish(conn, row)
+
+
+# ---------------------------------------------------------------------------
+# Shift staffing / parked bays
+#
+# At a short-staffed shift changeover, occupied bays that won't be worked are
+# PAUSED ("parked"): their clocks freeze (active/cycle/elapsed/total stop, like a
+# break) and they raise no delay alerts, so nobody is credited with work nobody
+# did. Resuming returns the bay to normal monitoring where it left off.
+# ---------------------------------------------------------------------------
+
+def pause_bay(conn, bay_id, initials):
+    """Park an occupied bay (freeze its clocks; suppress alerts)."""
+    _bay(conn, bay_id)
+    who = _require(initials, "Initials")
+    r = state.replay(conn)
+    run = r.bay_current.get(bay_id)
+    if run is None:
+        raise ActionError("That bay is empty — there's nothing to pause.")
+    if run.current_pause is not None:
+        raise ActionError("That bay is already paused.")
+
+    row = events.append(conn, "PAUSE", bay_id=bay_id, work_order=run.work_order,
+                        product_number=run.product_number,
+                        component_label=run.component_label, initials=who)
+    return _finish(conn, row)
+
+
+def resume_bay(conn, bay_id, initials):
+    """Un-park a paused bay: it returns to normal idle/running/delayed."""
+    _bay(conn, bay_id)
+    who = _require(initials, "Initials")
+    r = state.replay(conn)
+    run = r.bay_current.get(bay_id)
+    if run is None or run.current_pause is None:
+        raise ActionError("That bay isn't paused.")
+
+    row = events.append(conn, "RESUME", bay_id=bay_id, work_order=run.work_order,
+                        product_number=run.product_number, initials=who)
+    return _finish(conn, row)
+
+
+def shift_changeover(conn, pause_ids, resume_ids, initials):
+    """Apply a whole shift's staffing in one save (the changeover pop-up).
+
+    ``pause_ids`` are occupied bays to park; ``resume_ids`` are parked bays to
+    re-staff. Each bay is idempotent (one already in the desired state is simply
+    skipped), so confirming with no real change is harmless. Bays are evaluated
+    against the state at entry, so the order of the batch doesn't matter.
+    """
+    who = _require(initials, "Initials")
+    pause_ids = [int(x) for x in (pause_ids or [])]
+    resume_ids = [int(x) for x in (resume_ids or [])]
+
+    r = state.replay(conn)
+    changed = 0
+    for bid in pause_ids:
+        run = r.bay_current.get(bid)
+        if run is not None and run.current_pause is None:
+            events.append(conn, "PAUSE", bay_id=bid, work_order=run.work_order,
+                          product_number=run.product_number,
+                          component_label=run.component_label, initials=who)
+            changed += 1
+    for bid in resume_ids:
+        run = r.bay_current.get(bid)
+        if run is not None and run.current_pause is not None:
+            events.append(conn, "RESUME", bay_id=bid, work_order=run.work_order,
+                          product_number=run.product_number, initials=who)
+            changed += 1
+
+    state.invalidate_cache()
+    return None   # a batch has no single representative event row
 
 
 # ---------------------------------------------------------------------------

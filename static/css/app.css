@@ -37,6 +37,11 @@
   --db-delayed:      #D23B3B;   --db-delayed-fill: #CE3026; --db-delayed-band: #ff8175;
   --db-done:         #C8911F;   --db-done-2:    #e3ab33;
   --db-break:        #2f6df0;   --db-break-2:   #6fa0ff;
+  /* PAUSED (parked/unstaffed): violet -- the one hue not already in play
+     (green=running, red=delayed, amber=done, blue=on-break, gray=idle). Reads
+     as intentionally set aside, never as an alert. */
+  --db-paused:       #8b78e6;   --db-paused-2:  #b6a9f5;
+  --db-paused-fill:  #1b1640;   --db-paused-border: #3a2f6b;
 
   --accent:    #4a86ff;
   --warn:      #e6a417;
@@ -107,6 +112,7 @@ button.primary, .btn.primary { background: var(--accent); border-color: var(--ac
 button.danger,  .btn.danger  { background: var(--delayed); border-color: var(--delayed); color: #fff; }
 button.good,    .btn.good    { background: var(--running); border-color: var(--running); color: #fff; }
 button.warn,    .btn.warn    { background: var(--done); border-color: var(--done); color: var(--done-text); }
+button.violet,  .btn.violet  { background: var(--db-paused); border-color: var(--db-paused); color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 
 input, select, textarea {
@@ -196,6 +202,19 @@ body.fillscreen .tile { min-height: 0; }
 .tile.done::before     { background: var(--db-done); }
 .tile.on_break::before { background: var(--db-break); }
 .tile.delayed::before  { background: var(--db-delayed-band); }
+.tile.paused::before   { background: var(--db-paused); z-index: 2; }
+
+/* A parked bay: violet fill + a diagonal hatch so it reads as intentionally set
+   aside even at a glance across the floor. The hatch is an ::after layer behind
+   the tile's content (which is lifted with z-index:1). */
+.tile.paused { background: var(--db-paused-fill); color: #e7e2fb; }
+.tile.paused::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+              rgba(139,120,230,.16) 0 8px, transparent 8px 16px);
+}
+.tile.paused > * { position: relative; z-index: 1; }
+.tile .paused-note { font-size: 16px; font-weight: 600; color: #b3a8e0; margin-top: 12px; }
 
 .tile.idle { background: var(--db-tile-empty); color: #56646f; }
 .tile.empty-cell { background: transparent; border: 2px dashed var(--border); opacity: .4; }
@@ -216,6 +235,7 @@ body.fillscreen .tile { min-height: 0; }
 .tile.on_break .state-label { color: var(--db-break-2); }
 .tile.delayed  .state-label { color: #fff; }
 .tile.idle     .state-label { color: #56646f; }
+.tile.paused   .state-label { color: var(--db-paused-2); }
 
 /* Occupied body: big product number (no label, for a clean read), then the
    work-order subline. */
@@ -329,6 +349,83 @@ body.fillscreen .tile { min-height: 0; }
 .action-menu { display:flex; flex-direction: column; gap: 10px; }
 .action-menu button { text-align: left; padding: 14px; font-size: 16px; }
 .error-text { color: var(--bad); font-size: 14px; margin-top: 8px; min-height: 18px; }
+
+/* =========================================================================
+   SHIFT CHANGEOVER pop-up (console): staff/park the whole floor in one save.
+   Checkbox treatment -- a checkmark + bright border = staffed; an empty box +
+   dimmed cell + diagonal hatch = paused.
+   ========================================================================= */
+.modal.wide { width: 560px; }
+
+/* The floating trigger button on the console (bottom-right, above the grid). */
+#shift-btn {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  background: var(--db-paused); border-color: var(--db-paused); color: #fff;
+  font-weight: 700; padding: 12px 18px; border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4);
+}
+#shift-btn:hover { filter: brightness(1.08); border-color: var(--db-paused); }
+
+.sc-head { display: flex; align-items: center; gap: 10px; }
+.sc-head h2 { margin: 0; }
+.sc-badge {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--db-paused-2); background: #241d47; border: 1px solid var(--db-paused-border);
+  padding: 4px 8px; border-radius: 5px;
+}
+.sc-legend { display: flex; gap: 18px; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+.sc-legend > span { display: inline-flex; align-items: center; gap: 7px; }
+.sc-key {
+  width: 18px; height: 18px; border-radius: 4px; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff;
+}
+.sc-key.staffed { background: var(--running); }
+.sc-key.paused  { background: var(--db-paused); }
+
+.sc-grid { display: grid; gap: 9px; margin-top: 12px; }
+.sc-cell {
+  position: relative; min-height: 78px; border-radius: 9px; padding: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer; user-select: none; overflow: hidden;
+  border: 2px solid var(--running); background: #1d232e;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.sc-cell:hover { filter: brightness(1.12); }
+.sc-cell .sc-num { font-size: 22px; font-weight: 800; color: var(--text); line-height: 1; }
+.sc-cell .sc-cap { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.sc-cell .sc-box {
+  position: absolute; top: 6px; right: 7px; width: 18px; height: 18px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; color: #fff;
+}
+.sc-cell.staffed .sc-box { background: var(--db-paused); }
+.sc-cell.paused {
+  border-color: var(--db-paused-border); background: #15131f; opacity: .62;
+}
+.sc-cell.paused .sc-box { border: 2px solid #3c4350; }
+.sc-cell.paused .sc-num { color: #9389c9; }
+.sc-cell.paused::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+              rgba(139,120,230,.16) 0 6px, transparent 6px 12px);
+}
+.sc-cell.idle {
+  cursor: default; opacity: .35; border-style: dashed; border-color: var(--border);
+  background: transparent;
+}
+.sc-cell.idle:hover { filter: none; }
+/* An empty column slot in the extras row (no extra bay there) -- a spacer that
+   keeps the grid aligned with the board, not a clickable cell. */
+.sc-cell.blank { background: transparent; border: none; cursor: default; }
+.sc-cell.blank:hover { filter: none; }
+.sc-cell.idle .sc-num { color: var(--muted); font-size: 18px; }
+.sc-cell .sc-empty { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+
+.sc-floor { text-align: center; font-size: 11px; letter-spacing: .04em; color: #56646f; margin-top: 10px; }
+.sc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 14px; }
+.sc-foot .sc-pa { color: var(--db-paused-2); }
+.sc-reset { color: var(--muted); cursor: pointer; font-size: 13px; }
+.sc-reset:hover { color: var(--text); }
 
 /* type-to-filter product list */
 .filter-list { max-height: 180px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-top:6px;}

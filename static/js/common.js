@@ -44,10 +44,12 @@ const BT = (function () {
   }
 
   // Live elapsed for a tile: the server's counted seconds, plus locally-ticked
-  // time since the snapshot ONLY when the server said time is counting.
+  // time since the snapshot ONLY when the server said time is counting. A bay
+  // ON BREAK or PAUSED is frozen, so it never ticks locally.
   function liveElapsed(tile) {
     let base = tile.elapsed_seconds || 0;
-    if (lastSnapshot && lastSnapshot.is_counting && tile.status !== "ON_BREAK") {
+    if (lastSnapshot && lastSnapshot.is_counting
+        && tile.status !== "ON_BREAK" && tile.status !== "PAUSED") {
       base += (Date.now() - snapshotAt) / 1000;
     }
     return base;
