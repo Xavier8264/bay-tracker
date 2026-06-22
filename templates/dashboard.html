@@ -7,18 +7,20 @@
 {% block topbar %}{% endblock %}
 
 {% block content %}
+<!-- Direction B kiosk header: plant title + live status counts + clock. The
+     counts/clock and the DEMO DATA badge are filled in by dashboard.js. -->
+<div class="kiosk-header">
+  <div class="kh-title">
+    <span class="kh-name">BAY TRACKING</span>
+    <span class="kh-sub">LIVE BAY STATUS{% if division %} · {{ division|upper }}{% endif %}</span>
+  </div>
+  <div class="kh-status" id="kh-status"></div>
+</div>
+
 <div id="mode-banner"></div>
 
 <div class="grid-wrap">
   <div id="grid" class="bay-grid"></div>
-</div>
-
-<!-- tiny corner status: connection + clock + optional division filter -->
-<div style="position:fixed;bottom:10px;left:14px;font-size:13px;color:var(--muted);z-index:100;">
-  <span id="clock"></span>
-  {% if division %}<span> · Filter: <b>{{ division }}</b></span>{% endif %}
-  <span id="dash-conn"></span>
-  <span id="demo-tag" class="demo-tag" style="margin-left:8px;">DEMO DATA</span>
 </div>
 
 <!-- full-screen delay takeover -->

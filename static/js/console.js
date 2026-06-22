@@ -35,50 +35,50 @@
   const ICON = { RUNNING: "▶", DELAYED: "⚠", IDLE: "○", ON_BREAK: "⏸", DONE: "✔" };
   const LABEL = { RUNNING: "RUNNING", DELAYED: "DELAYED", IDLE: "IDLE", ON_BREAK: "ON BREAK", DONE: "DONE" };
 
-  // Every occupied tile shows the unit's ELAPSED (linear wall-clock) and TOTAL
-  // (time taken up across every bay it has touched -- parallel bays summed).
-  // Both tick while the plant clock is counting and freeze on breaks/off-hours.
-  function elapsedTotalRows(t) {
+  // Bottom-anchored time columns. Every occupied tile shows the unit's ELAPSED
+  // (linear wall-clock) and TOTAL (time across every bay it has touched --
+  // parallel bays summed); a delayed tile leads with the live DELAYED clock.
+  // All tick while the plant clock is counting and freeze on breaks/off-hours.
+  function timeCols(t, delayed) {
     const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
     const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
-    // .times is bottom-anchored (CSS margin-top:auto) so elapsed/total line up
-    // horizontally across every tile, however many lines sit above them.
-    return `<div class="times">
-      <div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
-      <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div></div>`;
+    let cols = "";
+    if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
+    cols += `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
+    cols += `<div class="tcol"><span class="tlabel">total</span><span class="tval">${total}</span></div>`;
+    return `<div class="times">${cols}</div>`;
   }
 
   function tileHTML(t) {
     const cls = "tile clickable " + t.status.toLowerCase();
     const state = `<span class="state-label"><span class="icon">${ICON[t.status]}</span>${LABEL[t.status]}</span>`;
-    const twobay = t.occupies_two ? `<span class="twobay">2 BAYS</span>` : "";
+    const head = `<div class="tile-head"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>`;
+
     if (t.status === "IDLE") {
-      return `<div class="${cls}" data-bay="${t.bay_id}">
-        <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-        <div class="meta">tap to start</div></div>`;
+      return `<div class="${cls}" data-bay="${t.bay_id}">${head}
+        <div class="empty-msg">＋ tap to start</div></div>`;
     }
     const es = effStatus(t);
-    const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
+    const sub = [t.product_number, t.component_label].filter(Boolean).map(BT.escapeHtml).join(" · ");
+    const parallel = t.occupies_two ? `<span class="parallel-chip">∥ 2 bays</span>` : "";
+
+    let body = `<div class="unit-label">work order</div>
+      <div class="unit-num">${BT.escapeHtml(t.work_order)}</div>
+      ${sub ? `<div class="sub-line">${sub}</div>` : ""}
+      ${parallel}`;
 
     if (es === "DELAYED") {
       const d = t.delay || {};
-      const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
-      const delayDur = BT.fmtElapsed(BT.liveElapsed(t));
-      return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
-        <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-        <div class="wo">${BT.escapeHtml(t.work_order)}</div>
-        <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-        <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
-        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayDur}</span></div>
-        ${elapsedTotalRows(t)}</div>`;
+      const cat = d.division ? `<span class="cat-chip">⚑ ${BT.escapeHtml(d.division)}</span>` : "";
+      body += `<div class="delay-info"><div class="reason">${BT.escapeHtml(d.reason || "Delay")}</div>${cat}</div>`;
     }
 
-    // RUNNING or DONE (work finished, part still in the bay, awaiting next step)
-    return `<div class="${cls}" data-bay="${t.bay_id}">${twobay}
-      <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-      <div class="wo">${BT.escapeHtml(t.work_order)}</div>
-      <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-      ${elapsedTotalRows(t)}</div>`;
+    // RUNNING / DONE / ON_BREAK — neutral body; status reads from the colored
+    // top band and the colored status word.
+    return `<div class="${cls}" data-bay="${t.bay_id}">
+      ${head}
+      <div class="tile-body">${body}</div>
+      ${timeCols(t, es === "DELAYED")}</div>`;
   }
 
   function render(snap) {

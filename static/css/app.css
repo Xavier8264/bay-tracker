@@ -24,6 +24,20 @@
   --break:     #2f6df0;   --break-2:     #4a86ff;   /* blue (NOT red!)     */
   --done:      #b9821b;   --done-text:   #fff3da;   /* amber: work done, part still in bay */
 
+  /* ----------------------------------------------------------------------
+     Direction B "neutral board" kiosk language (dashboard + console grid).
+     The field stays a calm dark; status reads from a thin colored band along
+     the top of each tile, so a flagged delay -- the one full-red, pulsing
+     tile -- explodes out of the calm. Status is STILL never color-only: every
+     tile keeps its word + icon label. */
+  --db-header:       #0A0E13;   /* kiosk header bar                         */
+  --db-tile:         #1A2128;   /* occupied tile field                      */
+  --db-tile-empty:   #141A20;   /* idle/empty tile field                    */
+  --db-running:      #1A8A4F;   --db-running-2: #2bb56e;  /* band / word     */
+  --db-delayed:      #D23B3B;   --db-delayed-fill: #CE3026; --db-delayed-band: #ff8175;
+  --db-done:         #C8911F;   --db-done-2:    #e3ab33;
+  --db-break:        #2f6df0;   --db-break-2:   #6fa0ff;
+
   --accent:    #4a86ff;
   --warn:      #e6a417;
   --good:      #25b866;
@@ -34,6 +48,13 @@
 }
 
 * { box-sizing: border-box; }
+
+/* A flagged delay is the only thing that breaks the calm board: the tile
+   fills red and pulses an outward glow so it's caught from across the floor. */
+@keyframes delayPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(214, 52, 52, 0); }
+  50%      { box-shadow: 0 0 46px 7px rgba(214, 52, 52, .6); }
+}
 
 html, body {
   margin: 0; padding: 0;
@@ -157,49 +178,104 @@ body.fillscreen .tile { min-height: 0; }
 .tile {
   position: relative;
   border-radius: var(--radius);
-  background: var(--idle);
-  color: var(--idle-text);
-  padding: 14px 16px;
-  display: flex; flex-direction: column; justify-content: space-between;
+  background: var(--db-tile);
+  color: #eef3f8;
+  padding: 18px 20px;
+  display: flex; flex-direction: column;
   min-height: 120px;
   border: 2px solid transparent;
   overflow: hidden;
 }
+/* The status band: a thin colored strip across the top edge of every tile.
+   Implemented as ::before so it never fights the clickable hover ring. */
+.tile::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 6px;
+  background: transparent;
+}
+.tile.running::before  { background: var(--db-running); }
+.tile.done::before     { background: var(--db-done); }
+.tile.on_break::before { background: var(--db-break); }
+.tile.delayed::before  { background: var(--db-delayed-band); }
+
+.tile.idle { background: var(--db-tile-empty); color: #56646f; }
 .tile.empty-cell { background: transparent; border: 2px dashed var(--border); opacity: .4; }
-.tile.running { background: var(--running); color: #eafff3; }
-.tile.delayed { background: var(--delayed); color: #fff; }
-.tile.on_break { background: var(--break); color: #eef4ff; }
-.tile.done { background: var(--done); color: var(--done-text); }
+/* The one loud tile: a flagged delay fills red and pulses. */
+.tile.delayed {
+  background: var(--db-delayed-fill); color: #fff;
+  animation: delayPulse 1.5s ease-in-out infinite;
+}
 
-.tile .bay-name { font-size: 15px; font-weight: 700; opacity: .9; display:flex; gap:8px; align-items:center;}
+.tile-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.tile .bay-name { font-size: 17px; font-weight: 700; letter-spacing:.04em; white-space:nowrap; }
 .tile .state-label {
-  font-size: 12px; font-weight: 800; letter-spacing: 1px;
-  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 800; letter-spacing: .06em;
+  display: inline-flex; align-items: center; gap: 6px; white-space:nowrap;
 }
-.tile .wo { font-size: 30px; font-weight: 800; line-height: 1.05; margin: 6px 0 0; word-break: break-all; }
-.tile .meta { font-size: 14px; opacity: .92; }
-.tile .elapsed { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.tile .reason { font-size: 15px; font-weight: 700; }
-.tile .divtag {
-  font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
-  background: rgba(0,0,0,.28); display: inline-block;
-}
-.tile .twobay {
-  position:absolute; top:10px; right:12px; font-size: 11px; font-weight:800;
-  background: rgba(0,0,0,.3); padding: 2px 7px; border-radius: 999px;
-}
-.tile-row { display:flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.tile.running  .state-label { color: var(--db-running-2); }
+.tile.done     .state-label { color: var(--db-done-2); }
+.tile.on_break .state-label { color: var(--db-break-2); }
+.tile.delayed  .state-label { color: #fff; }
+.tile.idle     .state-label { color: #56646f; }
 
-/* The elapsed/total block sits at the bottom of every tile so the time
-   labels align horizontally across the grid, regardless of how many content
-   lines (work order, product, reason) appear above them. */
-.tile .times { margin-top: auto; }
-.tile .times .tile-row { align-items: baseline; }
+/* Occupied body: small label, big work-order number, then product subline. */
+.tile-body { flex:1; display:flex; flex-direction:column; min-width:0; margin-top:14px; }
+.tile .unit-label { font-size:12px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; opacity:.55; }
+.tile .unit-num { font-size:44px; font-weight:800; line-height:.95; word-break:break-all; }
+.tile .sub-line { margin-top:4px; font-size:18px; font-weight:600; opacity:.72; }
+
+.tile .parallel-chip {
+  align-self:flex-start; margin-top:10px;
+  display:inline-flex; align-items:center; gap:6px;
+  background: rgba(255,255,255,.12); color:#cdd6df;
+  padding:4px 11px; border-radius:7px; font-size:13px; font-weight:600; white-space:nowrap;
+}
+.tile.delayed .parallel-chip { background: rgba(255,255,255,.18); color:#fff; }
+
+.tile .delay-info { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.tile .reason { font-size:26px; font-weight:700; line-height:1.05; }
+.tile .cat-chip {
+  align-self:flex-start; display:inline-flex; align-items:center; gap:7px;
+  background: rgba(255,255,255,.2); padding:5px 12px; border-radius:7px;
+  font-size:13px; font-weight:700; letter-spacing:.06em;
+}
+
+/* Time columns sit at the bottom of every tile so the labels line up across
+   the whole grid however many content lines appear above them. */
+.tile .times { margin-top:auto; padding-top:14px; display:flex; gap:30px; align-items:flex-end; }
+.tile .tcol { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.tile .tlabel { font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; opacity:.6; }
+.tile .tval { font-size:30px; font-weight:800; line-height:.9; font-variant-numeric:tabular-nums; }
+
+.tile .empty-msg {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  font-size:18px; font-weight:700; letter-spacing:.14em; opacity:.5; text-transform:uppercase;
+}
 
 /* clickable console tiles */
-.tile.clickable { cursor: pointer; transition: transform .05s ease; }
-.tile.clickable:hover { border-color: rgba(255,255,255,.55); }
+.tile.clickable { cursor: pointer; transition: transform .05s ease, box-shadow .1s ease; }
+.tile.clickable:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,.5); }
 .tile.clickable:active { transform: scale(.99); }
+
+/* =========================================================================
+   Direction B kiosk header (dashboard): title + live status counts + clock
+   ========================================================================= */
+.kiosk-header {
+  flex: none; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 28px; background: var(--db-header);
+  border-bottom: 1px solid var(--border); color: #fff;
+}
+.kiosk-header .kh-title { display:flex; align-items:baseline; gap:14px; }
+.kiosk-header .kh-name { font-size:21px; font-weight:700; letter-spacing:.05em; }
+.kiosk-header .kh-sub  { font-size:14px; font-weight:600; letter-spacing:.06em; color:#7c8794; }
+.kiosk-header .kh-status { display:flex; align-items:center; gap:22px; font-size:15px; font-weight:600; }
+.kiosk-header .kh-count { display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+.kiosk-header .kh-count.muted { color:#8b97a3; }
+.kiosk-header .kh-dot { width:11px; height:11px; border-radius:50%; display:inline-block; }
+.kiosk-header .kh-clock {
+  margin-left:6px; padding-left:22px; border-left:1px solid #2a323b;
+  font-size:18px; font-weight:700; letter-spacing:.04em; font-variant-numeric:tabular-nums;
+}
 
 /* ON BREAK / OFF HOURS banner ribbon */
 #mode-banner {

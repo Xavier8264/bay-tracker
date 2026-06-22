@@ -24,53 +24,74 @@
   // A bay's effective status (a bay on break still reflects its underlying run).
   function effStatus(t) { return t.status === "ON_BREAK" ? (t.paused_status || "IDLE") : t.status; }
 
-  // Every occupied tile shows the unit's ELAPSED (linear wall-clock) and TOTAL
-  // (time taken up across every bay touched). Both tick while time is counting.
-  function elapsedTotalRows(t) {
+  // Bottom-anchored time columns. Every occupied tile shows the unit's ELAPSED
+  // (linear wall-clock) and TOTAL (time across every bay touched); a delayed
+  // tile leads with the live DELAYED clock. Columns sit at the tile bottom
+  // (CSS margin-top:auto) so the labels line up across the whole grid.
+  function timeCols(t, delayed) {
     const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
     const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
-    // .times is bottom-anchored (CSS margin-top:auto) so elapsed/total line up
-    // horizontally across every tile, however many lines sit above them.
-    return `<div class="times">
-      <div class="tile-row"><span class="meta">elapsed</span><span class="elapsed">${elapsed}</span></div>
-      <div class="tile-row"><span class="meta">total</span><span class="meta">${total}</span></div></div>`;
+    let cols = "";
+    if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
+    cols += `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
+    cols += `<div class="tcol"><span class="tlabel">total</span><span class="tval">${total}</span></div>`;
+    return `<div class="times">${cols}</div>`;
   }
 
   function tileHTML(t) {
     const cls = "tile " + t.status.toLowerCase();
     const state = `<span class="state-label"><span class="icon">${ICON[t.status]}</span>${LABEL[t.status]}</span>`;
-    const twobay = t.occupies_two ? `<span class="twobay">2 BAYS</span>` : "";
+    const head = `<div class="tile-head"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>`;
 
     if (t.status === "IDLE") {
-      return `<div class="${cls}" data-bay="${t.bay_id}">
-        <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-        <div></div></div>`;
+      return `<div class="${cls}" data-bay="${t.bay_id}">${head}
+        <div class="empty-msg">— empty —</div></div>`;
     }
 
     const es = effStatus(t);
-    const comp = t.component_label ? `<span class="meta">· ${BT.escapeHtml(t.component_label)}</span>` : "";
+    const sub = [t.product_number, t.component_label].filter(Boolean).map(BT.escapeHtml).join(" · ");
+    const parallel = t.occupies_two ? `<span class="parallel-chip">∥ 2 bays</span>` : "";
+
+    let body = `<div class="unit-label">work order</div>
+      <div class="unit-num">${BT.escapeHtml(t.work_order)}</div>
+      ${sub ? `<div class="sub-line">${sub}</div>` : ""}
+      ${parallel}`;
 
     if (es === "DELAYED") {
       const d = t.delay || {};
-      const div = d.division ? `<span class="divtag">${BT.escapeHtml(d.division)}</span>` : "";
-      const delayDur = BT.fmtElapsed(BT.liveElapsed(t));
-      return `<div class="${cls} clickable" data-bay="${t.bay_id}">${twobay}
-        <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-        <div class="wo">${BT.escapeHtml(t.work_order)}</div>
-        <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-        <div class="reason">${BT.escapeHtml(d.reason || "")} ${div}</div>
-        <div class="tile-row"><span class="meta">delayed</span><span class="elapsed">${delayDur}</span></div>
-        ${elapsedTotalRows(t)}
-      </div>`;
+      const cat = d.division ? `<span class="cat-chip">⚑ ${BT.escapeHtml(d.division)}</span>` : "";
+      body += `<div class="delay-info"><div class="reason">${BT.escapeHtml(d.reason || "Delay")}</div>${cat}</div>`;
     }
 
-    // RUNNING or DONE (work finished, part still in the bay) — or ON_BREAK over either
-    return `<div class="${cls} clickable" data-bay="${t.bay_id}">${twobay}
-      <div class="tile-row"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>
-      <div class="wo">${BT.escapeHtml(t.work_order)}</div>
-      <div class="meta">${BT.escapeHtml(t.product_number || "")} ${comp}</div>
-      ${elapsedTotalRows(t)}
-    </div>`;
+    // RUNNING / DONE / ON_BREAK — all share the neutral body; status reads from
+    // the colored top band and the colored status word.
+    return `<div class="${cls} clickable" data-bay="${t.bay_id}">
+      ${head}
+      <div class="tile-body">${body}</div>
+      ${timeCols(t, es === "DELAYED")}</div>`;
+  }
+
+  // ---- live status counts + clock in the kiosk header --------------------
+  function renderHeader(snap) {
+    const el = document.getElementById("kh-status"); if (!el) return;
+    let running = 0, delayed = 0, done = 0, idle = 0;
+    (snap.tiles || []).forEach(t => {
+      const s = effStatus(t);
+      if (s === "DELAYED") delayed++;
+      else if (s === "DONE") done++;
+      else if (s === "IDLE") idle++;
+      else running++;
+    });
+    const clock = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const dot = c => `<span class="kh-dot" style="background:${c}"></span>`;
+    const demo = snap.demo_mode ? `<span class="demo-tag show">DEMO DATA</span>` : "";
+    el.innerHTML =
+      `<span class="kh-count">${dot("#2bb56e")}${running} Running</span>` +
+      `<span class="kh-count">${dot("#D23B3B")}${delayed} Delayed</span>` +
+      `<span class="kh-count">${dot("#e3ab33")}${done} Done</span>` +
+      `<span class="kh-count muted">${dot("#3a4450")}${idle} Idle</span>` +
+      demo +
+      `<span class="kh-clock">${clock}</span>`;
   }
 
   function emptyCellHTML() { return `<div class="tile empty-cell"></div>`; }
@@ -90,9 +111,7 @@
     const rows = (layout.extras_enabled ? 1 : 0) + Math.max(1, Math.ceil(standard.length / cols));
     grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
 
-    // demo-mode badge (the served DB is the demo one, not the live log)
-    const dt = document.getElementById("demo-tag");
-    if (dt) dt.classList.toggle("show", !!snap.demo_mode);
+    renderHeader(snap);   // counts + clock + demo badge live in the header now
     let html = "";
 
     if (layout.extras_enabled) {
@@ -207,14 +226,6 @@
     const el = document.documentElement;
     if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(() => {});
   }, { once: true });
-
-  // ---- clock + connection corner -----------------------------------------
-  function tickClock() {
-    const now = new Date();
-    document.getElementById("clock").textContent =
-      now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  setInterval(tickClock, 1000); tickClock();
 
   // ---- boot ---------------------------------------------------------------
   loadLayout().then(() => {
