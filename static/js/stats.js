@@ -41,9 +41,13 @@
     const startOfDay = new Date(y, now.getMonth(), now.getDate());
     if (preset === "today") return [ymd(startOfDay), ymd(now)];
     if (preset === "this_week") {
-      const dow = (now.getDay() + 6) % 7; // Monday=0
-      const mon = new Date(y, now.getMonth(), now.getDate() - dow);
-      return [ymd(mon), ymd(now)];
+      // Hard-coded: the work week starts Sunday night at 22:30 (10:30pm) — the
+      // start of third shift. Find the most recent Sunday 22:30 at or before now.
+      const start = new Date(y, now.getMonth(), now.getDate(), 22, 30, 0);
+      let back = now.getDay(); // Sun=0, Mon=1, ... Sat=6
+      if (now.getDay() === 0 && now < start) back = 7; // Sunday before 22:30 -> last week
+      start.setDate(start.getDate() - back);
+      return [dtLocal(start), ymd(now)];
     }
     if (preset === "mtd") return [ymd(new Date(y, now.getMonth(), 1)), ymd(now)];
     if (preset === "ytd") return [ymd(new Date(y, 0, 1)), ymd(now)];

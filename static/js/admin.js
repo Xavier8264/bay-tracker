@@ -333,6 +333,16 @@
   }
   $("add-break").onclick = () => { syncBreaks(); breaks.push({ start: "", minutes: 10, label: "" }); renderBreaks(); };
   $("add-shift").onclick = () => { syncShifts(); shifts.push({ name: "", start: "", end: "" }); renderShifts(); };
+  // The plant's standard three-shift pattern. Populates the table for review;
+  // the user still clicks "Save shifts" to commit (nothing is auto-saved).
+  $("fill-shifts").onclick = () => {
+    shifts = [
+      { name: "First", start: "06:30", end: "14:30" },
+      { name: "Second", start: "14:30", end: "22:30" },
+      { name: "Third", start: "22:30", end: "06:30" },
+    ];
+    renderShifts();
+  };
   document.addEventListener("click", e => {
     const db_ = e.target.closest("[data-del-break]"); if (db_) { syncBreaks(); breaks.splice(+db_.dataset.delBreak, 1); renderBreaks(); }
     const ds = e.target.closest("[data-del-shift]"); if (ds) { syncShifts(); shifts.splice(+ds.dataset.delShift, 1); renderShifts(); }
