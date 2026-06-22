@@ -241,8 +241,44 @@ def test_merge_different_work_orders():
     conn.close()
 
 
+def test_merge_different_wo_live_times():
+    print("== merging two different cells: survivor's total adds up, elapsed ties to earliest ==")
+    conn = fresh_conn()
+    b1, b2 = bay(conn, 1), bay(conn, 2)
+    # An EXISTING cell (EX) has been running a while; a NEW cell (NW) just started.
+    # (Distinct work orders, since the test DB is shared across the whole run.)
+    events.append(conn, "START", ts=f"{DAY} 10:00:00", bay_id=b1, work_order="EX", product_number="P")
+    events.append(conn, "START", ts=f"{DAY} 10:30:00", bay_id=b2, work_order="NW", product_number="P")
+    # Merge the existing cell (EX, bay 1) INTO the new cell (NW, bay 2): NW survives.
+    events.append(conn, "MATE", ts=f"{DAY} 10:45:00", bay_id=b2, target_bay_id=b1, work_order="NW")
+    snap = state.live_snapshot(conn, now=T("11:00"))
+    tile = next(t for t in snap["tiles"] if t["bay_id"] == b2)
+    check("released cell (bay 1) freed to IDLE",
+          float(any(t["bay_id"] == b1 and t["status"] == "IDLE" for t in snap["tiles"])), 1.0)
+    # total = B bay2 occupancy (10:30->11:00 = 30m) + absorbed A bay1 (10:00->10:45 = 45m).
+    check("total 75m (absorbed cell's bay-time added)", tile["unit_total_seconds"] / 60.0, 75)
+    # elapsed = linear from the EARLIEST cell's start (A at 10:00) to now (11:00).
+    check("elapsed 60m (ties to earliest cell's start)", tile["unit_elapsed_seconds"] / 60.0, 60)
+    conn.close()
+
+
+def test_event_timestamps_round_to_minute():
+    print("== newly-logged events round to the nearest minute ==")
+    from baytracker.events import round_to_minute
+    r = round_to_minute
+    check(":29 rounds down",
+          float(r(datetime(2026, 6, 10, 10, 0, 29)) == datetime(2026, 6, 10, 10, 0, 0)), 1.0)
+    check(":30 rounds up (tie)",
+          float(r(datetime(2026, 6, 10, 10, 0, 30)) == datetime(2026, 6, 10, 10, 1, 0)), 1.0)
+    check(":59 carries across the hour",
+          float(r(datetime(2026, 6, 10, 10, 59, 59)) == datetime(2026, 6, 10, 11, 0, 0)), 1.0)
+    check("microseconds dropped",
+          float(r(datetime(2026, 6, 10, 10, 0, 10, 500000)) == datetime(2026, 6, 10, 10, 0, 0)), 1.0)
+
+
 def main():
     try:
+        test_event_timestamps_round_to_minute()
         test_schedule_breaks_and_offhours()
         test_shift_attribution()
         test_shift_windows()
@@ -253,6 +289,7 @@ def main():
         test_complete_bay_keeps_part_in_bay()
         test_merge_total_vs_elapsed()
         test_merge_different_work_orders()
+        test_merge_different_wo_live_times()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
     print("\n" + ("ALL TIME-ENGINE TESTS PASSED" if not _FAILS else f"FAILURES: {_FAILS}"))

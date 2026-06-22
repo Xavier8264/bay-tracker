@@ -9,7 +9,6 @@
 (function () {
   let cfg = { bays: [], reasons: [], divisions: [], products: [], shifts: [] };
   const charts = {};
-  const myInitials = () => localStorage.getItem("bt_initials") || "";
 
   // ---- filter dropdowns ---------------------------------------------------
   async function loadConfig() {
@@ -210,7 +209,7 @@
   backdrop.addEventListener("click", e => { if (e.target === backdrop) close(); });
   function nowLocal() { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
-  function initF() { return `<label>Initials *</label><input id="ci" value="${BT.escapeHtml(myInitials())}" maxlength="8">`; }
+  function initF() { return `<label>Initials *</label><input id="ci" value="" maxlength="8">`; }
 
   async function submit(payload, btn) {
     btn.disabled = true;

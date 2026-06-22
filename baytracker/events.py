@@ -16,7 +16,7 @@ Corrections are themselves just new appended rows.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from . import config
@@ -38,9 +38,26 @@ EVENT_TYPES = {
 }
 
 
+def round_to_minute(dt: datetime) -> datetime:
+    """Round a datetime to the NEAREST whole minute (seconds >= 30 round up).
+
+    Every newly-logged event is snapped to a minute boundary so that, with all
+    starts minute-aligned, every bay's elapsed/total clock rolls to the next
+    minute at the same real-clock instant (on the :00 second). We don't need
+    second-level precision; uniformity across the floor is what matters.
+    """
+    floored = dt.replace(second=0, microsecond=0)
+    return floored + timedelta(minutes=1) if dt.second >= 30 else floored
+
+
 def now_ts() -> str:
-    """Current server time as an ISO-8601 string to the second."""
-    return datetime.now().strftime(config.TS_FORMAT)
+    """Current server time, rounded to the nearest minute, as an ISO-8601 string.
+
+    Timestamps are minute-aligned so the whole floor changes minutes in lockstep
+    (see round_to_minute). Storage still keeps the ``:SS`` field for format
+    stability -- it is simply always ``:00``.
+    """
+    return round_to_minute(datetime.now()).strftime(config.TS_FORMAT)
 
 
 def parse_ts(s: str) -> datetime:

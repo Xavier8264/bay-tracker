@@ -232,10 +232,11 @@ def unit_complete(conn, work_order, initials):
 # ---------------------------------------------------------------------------
 
 def _parse_ts_or_error(value: str) -> datetime:
-    # "ended now" is stamped server-side to the second (so it is always >= the
-    # start, and never depends on a client clock or a minute-truncated input).
+    # "ended now" is stamped server-side and rounded to the nearest minute (like
+    # every logged event), never trusting a client clock. Rounding is monotonic,
+    # so a rounded "now" is still always >= an already-rounded start time.
     if not value or _clean(value).lower() == "now":
-        return datetime.now()
+        return events.round_to_minute(datetime.now())
     value = _clean(value)
     for fmt in (config.TS_FORMAT, "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
         try:

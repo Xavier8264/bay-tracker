@@ -3,8 +3,9 @@
 
    Mirrors the dashboard grid, but every tile is clickable. The common path is
    optimized for the fewest clicks/keystrokes:
-     * Initials are entered in each action's pop-up (pre-filled with the last
-       initials used on this PC, with autocomplete from the admin roster).
+     * Initials are entered fresh in each action's pop-up -- the field is never
+       pre-filled, so whoever logs the action always types their own initials
+       (autocomplete from the admin roster still suggests as you type).
      * Product entry is type-to-filter, matching consecutive digits ANYWHERE in
        the number (so the last 3 digits find it), with an "Other" free-text path.
      * Barcode scanners just type into the focused field + Enter.
@@ -14,14 +15,6 @@
 (function () {
   let cfg = { reasons: [], products: [], initials: [], bays: [],
               layout: { grid_cols: 4, standard_rows: 3, extras_enabled: false } };
-
-  // Last-used initials, remembered per browser so the pop-up field is
-  // pre-filled but always visible and editable for each individual action.
-  const myInitials = () => (localStorage.getItem("bt_initials") || "").trim();
-  function rememberInitials(v) {
-    v = (v || "").trim();
-    if (v) localStorage.setItem("bt_initials", v);
-  }
 
   async function loadConfig() {
     const r = await BT.get("/api/config");
@@ -131,9 +124,10 @@
   function closeModal() { backdrop.classList.remove("show"); modal.innerHTML = ""; }
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(); });
   function initialsField(id = "f-initials") {
-    // Autocomplete from the admin roster, but free typing is always allowed.
+    // Never pre-filled: each action requires the operator to enter their own
+    // initials. Autocomplete from the admin roster suggests as they type.
     const opts = (cfg.initials || []).map(i => `<option value="${BT.escapeHtml(i)}">`).join("");
-    return `<label>Initials *</label><input id="${id}" value="${BT.escapeHtml(myInitials())}"
+    return `<label>Initials *</label><input id="${id}" value=""
             maxlength="8" autocomplete="off" list="initials-roster">
             <datalist id="initials-roster">${opts}</datalist>`;
   }
@@ -147,7 +141,7 @@
   async function doAction(payload, btn) {
     if (btn) btn.disabled = true;
     const r = await BT.post("/api/action", payload);
-    if (r.ok) { rememberInitials(payload.initials); closeModal(); }
+    if (r.ok) { closeModal(); }
     else { setErr((r.data && r.data.error) || "Something went wrong."); if (btn) btn.disabled = false; }
   }
 

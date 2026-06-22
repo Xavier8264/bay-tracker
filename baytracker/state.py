@@ -136,6 +136,12 @@ class UnitJourney:
         self.occupied_bays: set = set()           # bay_ids occupied right now
         self.delay_count = 0
         self.mated = False
+        # When two DIFFERENT work orders merge, the released unit is absorbed
+        # into the survivor. The survivor records the absorbed work order(s) here
+        # so its live elapsed/total can include the absorbed cell's bay-time and
+        # earliest start; the absorbed unit records who it merged into.
+        self.absorbed_work_orders: List[str] = []
+        self.merged_into: Optional[str] = None
 
     @property
     def is_open(self) -> bool:
@@ -313,6 +319,16 @@ def replay(conn) -> ReplayResult:
                     ru.completed = when
                     ru.outcome = "merged"
                     ru.mated = True
+                    ru.merged_into = wo
+                    # The survivor records the absorbed work order(s) so its LIVE
+                    # elapsed/total can fold in the absorbed cell's bay-time and
+                    # earliest start (see unit_live_times). We do NOT touch the
+                    # survivor's own first_started or per-unit duration breakdown,
+                    # so historical exports/stats stay honest -- the absorbed unit
+                    # keeps its own 'merged' row. A chain of merges carries fwd.
+                    if u is not None:
+                        u.absorbed_work_orders.append(rel_wo)
+                        u.absorbed_work_orders.extend(ru.absorbed_work_orders)
 
         elif etype == "DELAY_START":
             run = result.bay_current.get(bay)
@@ -411,22 +427,34 @@ def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
                     now: datetime) -> Tuple[float, float]:
     """Return (elapsed, total) counted SECONDS for a unit, live.
 
-    * elapsed = LINEAR time: counted wall-clock from the unit's first start to
-      ``now`` (or completion). It does not double-count parallel work.
+    * elapsed = LINEAR time: counted wall-clock from the EARLIEST start of any
+      cell now part of this unit to ``now`` (or completion). It does not
+      double-count parallel work. When two units started near the same time and
+      were merged, this ties to whichever cell started first.
     * total   = the time the unit has TAKEN UP across every bay it has touched,
       i.e. the SUM of each bay's occupied time. Two bays held in parallel add
       together here.
     They are equal for a unit that was only ever in one bay at a time; once it
     runs in two bays at once, total pulls ahead of elapsed by the overlap.
+
+    A unit absorbed from a different work order (a merge of two distinct cells)
+    folds its bay-time and start into the survivor here, so the surviving tile's
+    elapsed/total reflect BOTH cells -- the merge makes them add up and the clock
+    reaches back to the earliest cell.
     """
     end = unit.completed or now
+    # The survivor's own work order plus any work orders merged into it.
+    work_orders = {unit.work_order, *unit.absorbed_work_orders}
     total = 0.0
+    earliest = unit.first_started
     for r in runs:
-        if r.work_order != unit.work_order:
+        if r.work_order not in work_orders:
             continue
         s, e = r.occupied_interval(end)
         total += sched.counted_seconds(s, e)
-    elapsed = sched.counted_seconds(unit.first_started, end)
+        if r.started < earliest:
+            earliest = r.started
+    elapsed = sched.counted_seconds(earliest, end)
     return elapsed, total
 
 
