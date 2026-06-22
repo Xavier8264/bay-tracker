@@ -26,15 +26,15 @@
 
   // Bottom-anchored time columns. Every occupied tile shows the unit's ELAPSED
   // (linear wall-clock) and TOTAL (time across every bay touched); a delayed
-  // tile leads with the live DELAYED clock. Columns sit at the tile bottom
-  // (CSS margin-top:auto) so the labels line up across the whole grid.
+  // tile adds the live DELAYED clock after them (elapsed · total · delayed).
+  // Columns sit at the tile bottom (CSS margin-top:auto) so the labels line up
+  // across the whole grid.
   function timeCols(t, delayed) {
     const elapsed = BT.fmtElapsed(BT.liveSeconds(t.unit_elapsed_seconds, true));
     const total = BT.fmtElapsed(BT.liveSeconds(t.unit_total_seconds, true));
-    let cols = "";
-    if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
-    cols += `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
+    let cols = `<div class="tcol"><span class="tlabel">elapsed</span><span class="tval">${elapsed}</span></div>`;
     cols += `<div class="tcol"><span class="tlabel">total</span><span class="tval">${total}</span></div>`;
+    if (delayed) cols += `<div class="tcol"><span class="tlabel">delayed</span><span class="tval">${BT.fmtElapsed(BT.liveElapsed(t))}</span></div>`;
     return `<div class="times">${cols}</div>`;
   }
 
@@ -50,19 +50,18 @@
 
     const es = effStatus(t);
     // Product number is the primary read (most important on the floor); the work
-    // order drops to the subline. If a (legacy) record has no product number,
-    // fall back to the work order as the headline so the big line is never blank.
+    // order sits below it. No label above the number -- the product reads cleaner
+    // on its own. Fall back to the work order as the headline if a (legacy)
+    // record has no product number, so the big line is never blank.
     const hasProduct = !!t.product_number;
     const primary = BT.escapeHtml(hasProduct ? t.product_number : t.work_order);
-    const primaryLabel = hasProduct ? "product" : "work order";
     const subParts = [];
     if (hasProduct) subParts.push(t.work_order);
     if (t.component_label) subParts.push(t.component_label);
     const sub = subParts.map(BT.escapeHtml).join(" · ");
     const parallel = t.occupies_two ? `<span class="parallel-chip">∥ 2 bays</span>` : "";
 
-    let body = `<div class="unit-label">${primaryLabel}</div>
-      <div class="unit-num">${primary}</div>
+    let body = `<div class="unit-num">${primary}</div>
       ${sub ? `<div class="sub-line">${sub}</div>` : ""}
       ${parallel}`;
 

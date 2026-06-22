@@ -217,9 +217,9 @@ body.fillscreen .tile { min-height: 0; }
 .tile.delayed  .state-label { color: #fff; }
 .tile.idle     .state-label { color: #56646f; }
 
-/* Occupied body: small label, big work-order number, then product subline. */
+/* Occupied body: big product number (no label, for a clean read), then the
+   work-order subline. */
 .tile-body { flex:1; display:flex; flex-direction:column; min-width:0; margin-top:14px; }
-.tile .unit-label { font-size:12px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; opacity:.55; }
 .tile .unit-num { font-size:44px; font-weight:800; line-height:.95; word-break:break-all; }
 .tile .sub-line { margin-top:4px; font-size:18px; font-weight:600; opacity:.72; }
 
