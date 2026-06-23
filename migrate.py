@@ -39,14 +39,16 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
 
 # ---------------------------------------------------------------------------
 # The ordered list of migrations. Each is an idempotent callable(conn).
-# Example of what a future entry would look like (left commented as a template):
-#
-#   def _add_priority_to_events(conn):
-#       _add_column_if_missing(conn, "events", "priority", "INTEGER")
-#
-#   MIGRATIONS = [_add_priority_to_events]
 # ---------------------------------------------------------------------------
-MIGRATIONS: list = []
+
+def _add_action_group_to_events(conn):
+    """v3: group the rows of one operator action so the console Undo can reverse
+    a multi-row action (a shift changeover) atomically. (db.create_schema also
+    applies this on startup; running it here keeps the migration history honest.)"""
+    _add_column_if_missing(conn, "events", "action_group", "TEXT")
+
+
+MIGRATIONS: list = [_add_action_group_to_events]
 
 
 def main() -> None:

@@ -121,6 +121,32 @@
       banner.textContent = "⏸ ON BREAK — timers paused (you can still log actions)"; }
     else if (snap.off_hours) { banner.classList.add("off");
       banner.textContent = "OFF-HOURS — timers paused (you can still log actions)"; }
+
+    updateUndoButton(snap);
+  }
+
+  // ---- Undo (top bar) -----------------------------------------------------
+  // The button reflects snap.undo: enabled only while there's an action this
+  // shift to reverse. Its tooltip names what the next press will undo.
+  function updateUndoButton(snap) {
+    const btn = document.getElementById("undo-btn");
+    if (!btn) return;
+    const u = (snap && snap.undo) || { available: false };
+    btn.disabled = !u.available;
+    btn.classList.toggle("ready", !!u.available);
+    btn.title = u.available ? "Undo: " + (u.summary || "last action") : "Nothing to undo";
+  }
+
+  function undoModal() {
+    const snap = BT.getSnapshot(); if (!snap) return;
+    const u = snap.undo || {};
+    if (!u.available) return;
+    const when = u.at ? ` <span class="hint">(logged ${BT.escapeHtml(u.at)})</span>` : "";
+    confirmModal("Undo last action",
+      `Undo <b>${BT.escapeHtml(u.summary || "the last action")}</b>?${when}<br>` +
+      `This reverses it on the board. Nothing is deleted — the action and the undo ` +
+      `both stay in the log.`,
+      (btn, ini) => doAction({ action: "undo", initials: ini, expect_event_id: u.event_id }, btn));
   }
 
   // ---- modal helpers ------------------------------------------------------
@@ -478,6 +504,8 @@
     if (tile) openBay(parseInt(tile.dataset.bay, 10));
   });
   document.getElementById("shift-btn").onclick = shiftChangeoverModal;
+  const undoBtn = document.getElementById("undo-btn");
+  if (undoBtn) undoBtn.onclick = undoModal;
 
   // ---- boot ---------------------------------------------------------------
   loadConfig().then(() => {

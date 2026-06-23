@@ -18,6 +18,12 @@
     <a href="{{ url_for('dashboard') }}" class="{{ 'active' if active_page=='dashboard' }}">Dashboard</a>
     <a href="{{ url_for('stats') }}" class="{{ 'active' if active_page=='stats' }}">Stats</a>
     <a href="{{ url_for('admin') }}" class="{{ 'active' if active_page=='admin' }}">Admin</a>
+    {% if active_page == 'console' %}
+    {# Undo the most recent floor action (accidental merge/move/etc.). Enabled
+       only while there's something to undo this shift; console.js manages it. #}
+    <button id="undo-btn" class="undo-btn" type="button" disabled
+            title="Nothing to undo">↶ Undo</button>
+    {% endif %}
     <span class="spacer"></span>
     <span id="demo-tag" class="demo-tag">DEMO DATA</span>
     <span id="conn-pill" class="status-pill">LIVE</span>

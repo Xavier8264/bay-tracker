@@ -16,6 +16,7 @@ Corrections are themselves just new appended rows.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -24,21 +25,29 @@ from . import config
 
 # The complete set of columns an event row may carry, in a stable order. Keeping
 # this in one place means append() and the raw export never drift apart.
+#   action_group (2026-06): a tag shared by every row written for ONE operator
+#   action, so the console Undo can reverse a multi-row action (a shift
+#   changeover parks several bays at once) as a single unit. A standalone action
+#   gets its own unique group; older rows have NULL and are undone individually.
 EVENT_COLUMNS = [
     "ts", "type", "bay_id", "target_bay_id", "work_order", "product_number",
     "component_label", "delay_reason_id", "reason_label", "division",
     "in_out_of_control", "note", "initials",
-    "supersedes_event_id", "corrected_ts", "acts_as",
+    "supersedes_event_id", "corrected_ts", "acts_as", "action_group",
 ]
 
 # Every recognised event type (spec section 3).
 #   PAUSE / RESUME (2026-06): park an occupied-but-unstaffed bay at a shift
 #   changeover. While paused, the bay's clocks freeze (active/cycle/elapsed/total
 #   all stop accruing, like a break) and no delay can be flagged on it.
+#   VOID (2026-06): the console Undo. A VOID row points (via supersedes_event_id)
+#   at an earlier action's row; state.replay then skips that row entirely, so the
+#   action is reversed WITHOUT rewriting history -- both the original row and its
+#   VOID stay in the append-only log for the audit trail.
 EVENT_TYPES = {
     "START", "MOVE", "COMPLETE_BAY", "MATE",
     "DELAY_START", "DELAY_CLEAR", "UNIT_COMPLETE", "SCRAP", "CORRECTION",
-    "PAUSE", "RESUME",
+    "PAUSE", "RESUME", "VOID",
 }
 
 
@@ -75,6 +84,10 @@ def append(conn: sqlite3.Connection, type: str, **fields) -> sqlite3.Row:
     The timestamp is stamped here, server-side, unless the caller passes an
     explicit ``ts`` (used only when replaying tests). Unknown fields are ignored
     so callers can pass a superset comfortably.
+
+    Every row is tagged with an ``action_group``: callers that write several rows
+    for one logical action (e.g. a shift changeover) pass a shared group so Undo
+    can reverse them together; everyone else gets a fresh unique group here.
     """
     if type not in EVENT_TYPES:
         raise ValueError(f"Unknown event type: {type!r}")
@@ -82,6 +95,7 @@ def append(conn: sqlite3.Connection, type: str, **fields) -> sqlite3.Row:
     values = {col: None for col in EVENT_COLUMNS}
     values["type"] = type
     values["ts"] = fields.get("ts") or now_ts()
+    values["action_group"] = fields.get("action_group") or uuid.uuid4().hex
     for col in EVENT_COLUMNS:
         if col in fields and fields[col] is not None:
             values[col] = fields[col]

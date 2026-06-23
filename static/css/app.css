@@ -85,6 +85,18 @@ html, body {
 .topbar a:hover { background: var(--panel-2); color: var(--text); }
 .topbar a.active { background: var(--accent); color: #fff; }
 
+/* Undo button (console top bar). Sits with the nav on the left; muted until
+   there's something to undo this shift, then it lights amber to invite a tap. */
+.topbar .undo-btn {
+  margin-left: 6px; padding: 6px 12px; font-size: 14px; font-weight: 600;
+  border-radius: 8px;
+}
+.topbar .undo-btn.ready {
+  background: var(--warn); border-color: var(--warn); color: #1a1205;
+}
+.topbar .undo-btn.ready:hover { filter: brightness(1.08); }
+.topbar .undo-btn:disabled { opacity: .4; }
+
 /* ---- offline / connection indicator ----------------------------------- */
 #offline-banner {
   display: none;

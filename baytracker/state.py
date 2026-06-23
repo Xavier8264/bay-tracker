@@ -29,11 +29,23 @@ Time accounting rules implemented here (spec section 4):
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from . import db, events
 from .schedule import Schedule, Interval
+
+# Event types the console Undo can reverse: the floor actions an operator logs.
+# CORRECTION (stats page, PIN-gated) and VOID (an undo itself) are deliberately
+# excluded -- undo is for fixing an accidental floor action.
+UNDOABLE_TYPES = {
+    "START", "MOVE", "COMPLETE_BAY", "MATE", "DELAY_START", "DELAY_CLEAR",
+    "PAUSE", "RESUME", "UNIT_COMPLETE", "SCRAP",
+}
+
+# When no shifts are configured, Undo reaches back at most this many hours rather
+# than into the entire log (a sane "this working session" bound).
+UNDO_FALLBACK_HOURS = 12
 
 # ---------------------------------------------------------------------------
 # Episode containers. Plain classes with attributes -- readable over clever.
@@ -189,6 +201,12 @@ class ReplayResult:
         self.units: Dict[str, UnitJourney] = {}
         self.bay_current: Dict[int, BayRun] = {}   # bay_id -> open run
         self.last_event_id: int = 0
+        # event ids reversed by a VOID/undo (skipped during this replay).
+        self.voided_event_ids: set = set()
+        # The event row(s) the NEXT console Undo would reverse -- the most recent
+        # not-yet-voided undoable action, expanded to its whole action_group so a
+        # multi-row action (shift changeover) undoes as one. Empty if nothing.
+        self.undo_members: List = []
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +276,77 @@ def _effective_ts_map(rows) -> Dict[int, str]:
     return out
 
 
+def _next_undo_group(rows, voided: set) -> List:
+    """The event row(s) the next console Undo would reverse.
+
+    Find the most recent undoable, not-yet-voided action (scanning newest first),
+    then expand it to every still-live row sharing its ``action_group`` so a
+    multi-row action (a shift changeover) is undone as one unit. Rows predating
+    the action_group column (NULL) stand alone. Returns [] when nothing remains
+    to undo. The time-window bound (this shift) is applied by the caller, since
+    it depends on "now"; this picks the structural target only.
+    """
+    target = None
+    for r in reversed(rows):
+        if r["type"] in UNDOABLE_TYPES and r["id"] not in voided:
+            target = r
+            break
+    if target is None:
+        return []
+    grp = target["action_group"]
+    if grp is None:
+        return [target]
+    return [r for r in rows
+            if r["action_group"] == grp and r["type"] in UNDOABLE_TYPES
+            and r["id"] not in voided]
+
+
+def undo_floor(sched: Schedule, now: datetime) -> datetime:
+    """The earliest action-time the console Undo may reach: the start of the
+    current shift, or a fixed recent window when no shifts are configured."""
+    return sched.current_shift_start(now) or (now - timedelta(hours=UNDO_FALLBACK_HOURS))
+
+
+def describe_undo(members: List, bay_name: Dict[int, str]) -> str:
+    """A short human label for what the next Undo reverses (shown on the button
+    and the confirm dialog), e.g. 'Merge Bay 5 into Bay 3 (WO 1042)'."""
+    if not members:
+        return ""
+    if len(members) > 1:
+        # The only multi-row action today is a shift changeover (PAUSE/RESUME).
+        n = len(members)
+        return f"Shift changeover ({n} {'bay' if n == 1 else 'bays'})"
+
+    m = members[0]
+    et = m["type"]
+    wo = m["work_order"] or ""
+    bay = bay_name.get(m["bay_id"], f"Bay {m['bay_id']}") if m["bay_id"] else ""
+    tgt = bay_name.get(m["target_bay_id"], f"Bay {m['target_bay_id']}") if m["target_bay_id"] else ""
+    wo_tag = f" ({wo})" if wo else ""
+    if et == "START":
+        return f"Start at {bay}{wo_tag}"
+    if et == "MOVE":
+        return f"Move {wo}: {bay} → {tgt}".strip()
+    if et == "COMPLETE_BAY":
+        return f"Work done at {bay}{wo_tag}"
+    if et == "MATE":
+        return f"Merge {tgt} into {bay}{wo_tag}"
+    if et == "DELAY_START":
+        reason = m["reason_label"] or "delay"
+        return f"Flag delay at {bay} — {reason}"
+    if et == "DELAY_CLEAR":
+        return f"Clear delay at {bay}{wo_tag}"
+    if et == "PAUSE":
+        return f"Pause {bay}{wo_tag}"
+    if et == "RESUME":
+        return f"Resume {bay}{wo_tag}"
+    if et == "UNIT_COMPLETE":
+        return f"Complete unit {wo}"
+    if et == "SCRAP":
+        return f"Scrap {wo}"
+    return et
+
+
 # ---------------------------------------------------------------------------
 # The replay itself.
 # ---------------------------------------------------------------------------
@@ -268,6 +357,13 @@ def replay(conn) -> ReplayResult:
     if not rows:
         return result
     result.last_event_id = rows[-1]["id"]
+
+    # An undo is a VOID row pointing at the event it reverses; that target is
+    # skipped below so the action is undone WITHOUT mutating the log.
+    voided = {r["supersedes_event_id"] for r in rows
+              if r["type"] == "VOID" and r["supersedes_event_id"] is not None}
+    result.voided_event_ids = voided
+    result.undo_members = _next_undo_group(rows, voided)
 
     retime = _effective_ts_map(rows)
 
@@ -306,6 +402,14 @@ def replay(conn) -> ReplayResult:
         etype = r["type"]
         bay = r["bay_id"]
         wo = r["work_order"]
+
+        # A VOID row carries no transition of its own -- its only effect (skipping
+        # the event it reverses) is handled by the `voided` set below.
+        if etype == "VOID":
+            continue
+        # An undone event replays as if it never happened.
+        if r["id"] in voided:
+            continue
 
         # Retime corrections carry no transition -- their only effect (moving a
         # superseded event's time) is already baked into eff() above. Only
@@ -593,6 +697,7 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
         "SELECT * FROM bays WHERE active = 1 ORDER BY is_extra ASC, sort_order ASC;"
     ).fetchall()
     bay_number = {b["id"]: b["sort_order"] for b in bays}
+    bay_name = {b["id"]: b["name"] for b in bays}
 
     tiles = []
     for b in bays:
@@ -680,6 +785,25 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
     open_runs = sum(1 for r in result.runs if r.is_open)
     open_delays = sum(1 for d in result.delays if d.is_open)
 
+    # What the console Undo button offers right now: the most recent undoable
+    # action, but only while it falls within the current shift (so a fresh shift
+    # can't reach back and rewrite the last one). event_id is a race token the
+    # POST echoes back, so two operators can't undo different things by surprise.
+    undo = {"available": False, "summary": None, "kind": None,
+            "count": 0, "at": None, "event_id": None}
+    members = result.undo_members
+    if members:
+        at = min(events.parse_ts(m["ts"]) for m in members)
+        if at >= undo_floor(sched, now):
+            undo = {
+                "available": True,
+                "summary": describe_undo(members, bay_name),
+                "kind": "shift_changeover" if len(members) > 1 else members[0]["type"],
+                "count": len(members),
+                "at": _fmt(at),
+                "event_id": max(m["id"] for m in members),
+            }
+
     return {
         "server_time": _fmt(now),
         # True only in a database created by make_demo_data.py. The UI shows a
@@ -697,4 +821,5 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
         "open_runs": open_runs,
         "open_delays": open_delays,
         "bay_number": bay_number,
+        "undo": undo,
     }

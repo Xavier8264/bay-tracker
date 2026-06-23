@@ -27,7 +27,9 @@ from . import config
 # applies additive changes; it is informational/forward-only and never triggers
 # a destructive reset.
 #   v2 (2026-06): added recipients + notification_outbox (delay notifications).
-SCHEMA_VERSION = 2
+#   v3 (2026-06): added events.action_group (groups the rows of one action so the
+#                 console Undo can reverse a multi-row action atomically).
+SCHEMA_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +65,14 @@ CREATE TABLE IF NOT EXISTS events (
     initials            TEXT,               -- who performed the action (required on logged actions)
 
     -- Correction plumbing (see state.py for how these are applied):
-    supersedes_event_id INTEGER,            -- the event whose effective time this CORRECTION overrides
+    supersedes_event_id INTEGER,            -- the event whose effective time this CORRECTION overrides (also: the row a VOID/undo reverses)
     corrected_ts        TEXT,               -- the new effective timestamp the correction applies
-    acts_as             TEXT                -- 'DELAY_CLEAR'|'COMPLETE_BAY'|'UNIT_COMPLETE' when a correction closes a forgotten-open item
+    acts_as             TEXT,               -- 'DELAY_CLEAR'|'COMPLETE_BAY'|'UNIT_COMPLETE' when a correction closes a forgotten-open item
+
+    -- Groups the row(s) written for ONE operator action so the console Undo can
+    -- reverse a multi-row action (a shift changeover parks several bays) as a
+    -- unit. Unique per action; NULL on rows written before this column existed.
+    action_group        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_type        ON events(type);
@@ -234,11 +241,23 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
 def create_schema(conn: sqlite3.Connection) -> None:
     """Create every table/index if it does not already exist. Non-destructive."""
     conn.executescript(SCHEMA_SQL)
+    # CREATE TABLE IF NOT EXISTS never adds a column to an existing table, so
+    # additive columns are applied here too (idempotently). This keeps startup
+    # self-healing even if migrate.py hasn't been run -- same spirit as the
+    # data-folder self-heal in connect(). migrate.py applies the same change.
+    _ensure_event_columns(conn)
     # Record the schema version exactly once.
     row = conn.execute("SELECT version FROM schema_version LIMIT 1;").fetchone()
     if row is None:
         conn.execute("INSERT INTO schema_version (version) VALUES (?);", (SCHEMA_VERSION,))
     conn.commit()
+
+
+def _ensure_event_columns(conn: sqlite3.Connection) -> None:
+    """Add any events columns introduced after the original schema (idempotent)."""
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(events);").fetchall()}
+    if "action_group" not in existing:
+        conn.execute("ALTER TABLE events ADD COLUMN action_group TEXT;")
 
 
 # ---------------------------------------------------------------------------

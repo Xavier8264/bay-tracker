@@ -189,15 +189,15 @@ class Schedule:
         """True if timers should be ticking right now (operating, not on break)."""
         return (not self.is_off_hours(now)) and (self.active_break(now) is None)
 
-    def shift_for(self, when: datetime) -> Optional[str]:
-        """Attribute a timestamp to a shift name.
+    def _shift_obj_for(self, when: datetime) -> Optional[dict]:
+        """The shift dict a timestamp belongs to (the single source of the rule
+        shared by shift_for and current_shift_start). None if no shifts.
 
         Shifts entered with an explicit end use window containment: the shift
         whose [start, end) contains the time wins (start > end wraps past
         midnight). Shifts without an end keep the original clean-cutoff rule.
         Real-world handoff overlaps (a 2:00/2:30 changeover) intentionally
-        don't affect attribution (spec section 4). Returns None when no shifts
-        are configured.
+        don't affect attribution (spec section 4).
         """
         if not self.shifts:
             return None
@@ -214,7 +214,7 @@ class Schedule:
                 continue                       # zero-length window: never matches
             inside = (lo <= mins < hi) if lo < hi else (mins >= lo or mins < hi)
             if inside:
-                return s.get("name")
+                return s
 
         # Fallback: the original cutoff rule, for shifts saved before "end"
         # existed (and for times in a gap between explicit windows).
@@ -226,7 +226,29 @@ class Schedule:
         # last shift (which started the previous evening and wraps past midnight).
         if chosen is None:
             chosen = self.shifts[-1]
-        return chosen.get("name")
+        return chosen
+
+    def shift_for(self, when: datetime) -> Optional[str]:
+        """Attribute a timestamp to a shift name (None when no shifts)."""
+        s = self._shift_obj_for(when)
+        return s.get("name") if s else None
+
+    def current_shift_start(self, now: datetime) -> Optional[datetime]:
+        """The datetime the shift containing ``now`` began, or None if no shifts.
+
+        Used to bound the console Undo to the current shift: an action stamped
+        before this instant belongs to a prior shift and can't be undone. The
+        start is anchored to today's date, rolled back a day when the shift
+        began the previous evening (a window that wraps past midnight).
+        """
+        s = self._shift_obj_for(now)
+        if not s:
+            return None
+        start_min = _minutes_of_day(s.get("start", "00:00"))
+        cand = datetime(now.year, now.month, now.day) + timedelta(minutes=start_min)
+        if cand > now:
+            cand -= timedelta(days=1)
+        return cand
 
 
 def _minutes_of_day(hhmm: str) -> int:

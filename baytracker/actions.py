@@ -18,10 +18,12 @@ initials/note/etc., the action is rejected rather than auto-filled.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import Optional
 
 from . import events, state, config
+from .schedule import Schedule
 
 
 class ActionError(Exception):
@@ -252,24 +254,73 @@ def shift_changeover(conn, pause_ids, resume_ids, initials):
     pause_ids = [int(x) for x in (pause_ids or [])]
     resume_ids = [int(x) for x in (resume_ids or [])]
 
+    # One shared action_group across the whole batch so the console Undo reverses
+    # the entire changeover (every parked/re-staffed bay) as a single action.
+    group = uuid.uuid4().hex
+
     r = state.replay(conn)
     changed = 0
     for bid in pause_ids:
         run = r.bay_current.get(bid)
         if run is not None and run.current_pause is None:
-            events.append(conn, "PAUSE", bay_id=bid, work_order=run.work_order,
+            events.append(conn, "PAUSE", action_group=group, bay_id=bid,
+                          work_order=run.work_order,
                           product_number=run.product_number,
                           component_label=run.component_label, initials=who)
             changed += 1
     for bid in resume_ids:
         run = r.bay_current.get(bid)
         if run is not None and run.current_pause is not None:
-            events.append(conn, "RESUME", bay_id=bid, work_order=run.work_order,
+            events.append(conn, "RESUME", action_group=group, bay_id=bid,
+                          work_order=run.work_order,
                           product_number=run.product_number, initials=who)
             changed += 1
 
     state.invalidate_cache()
     return None   # a batch has no single representative event row
+
+
+# ---------------------------------------------------------------------------
+# Undo (console). Reverse the most recent floor action by appending a VOID row
+# for each event in its action_group; state.replay then skips those rows. The
+# original rows and their VOIDs both stay in the append-only log -- nothing is
+# deleted, so the audit trail and exports' raw Events sheet stay complete.
+# ---------------------------------------------------------------------------
+
+def undo_last(conn, initials, expect_event_id=None, now=None):
+    """Undo the most recent undoable action (see state.UNDOABLE_TYPES).
+
+    Bounded to the current shift (state.undo_floor) so a new shift can't rewrite
+    an earlier one. ``expect_event_id`` is a race token from the snapshot: if the
+    floor has moved on since the operator opened Undo, we refuse rather than
+    silently undo something else. Pressing Undo again walks one action further
+    back. Returns None (an undo may void several rows; it has no single one)."""
+    who = _require(initials, "Initials")
+    now = now or datetime.now()
+
+    r = state.replay(conn)
+    members = r.undo_members
+    if not members:
+        raise ActionError("There's nothing to undo.")
+
+    sched = Schedule.from_settings(conn)
+    earliest = min(events.parse_ts(m["ts"]) for m in members)
+    if earliest < state.undo_floor(sched, now):
+        raise ActionError("That action is from an earlier shift — undo only "
+                          "reaches back to the start of this shift.")
+
+    newest_id = max(m["id"] for m in members)
+    if expect_event_id is not None and int(expect_event_id) != newest_id:
+        raise ActionError("The floor changed since you opened Undo — "
+                          "check the board and try again.")
+
+    group = uuid.uuid4().hex
+    for m in members:
+        events.append(conn, "VOID", action_group=group,
+                      supersedes_event_id=m["id"], bay_id=m["bay_id"],
+                      work_order=m["work_order"], product_number=m["product_number"],
+                      note=f"Undo {m['type']} (event #{m['id']})", initials=who)
+    return _finish(conn, None)
 
 
 # ---------------------------------------------------------------------------

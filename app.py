@@ -306,6 +306,8 @@ def _dispatch_action(conn, name, p):
                                         p.get("initials"))
     if name == "unit_complete":
         return actions.unit_complete(conn, p.get("work_order"), p.get("initials"))
+    if name == "undo":
+        return actions.undo_last(conn, p.get("initials"), p.get("expect_event_id"))
     raise ActionError("Unknown action.")
 
 
