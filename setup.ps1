@@ -79,18 +79,42 @@ if (-not (Test-Path $venvPy)) {
 $wheelhouse = Join-Path $RepoDir "wheelhouse"
 $haveWheels = (Test-Path $wheelhouse) -and (@(Get-ChildItem $wheelhouse -Filter *.whl -ErrorAction SilentlyContinue).Count -gt 0)
 if (-not $Offline -and $haveWheels) {
-    $online = Test-Connection -ComputerName "pypi.org" -Count 1 -Quiet -ErrorAction SilentlyContinue
-    if (-not $online) { $Offline = $true; Write-Host "No internet detected -- using the vendored wheelhouse." }
+    # Decide online vs. offline by actually reaching PyPI over HTTPS -- NOT an ICMP
+    # ping. Corporate networks routinely block outbound ping while still allowing
+    # HTTPS, so a ping test wrongly forces the (Python-version-specific) wheelhouse.
+    $online = $false
+    try { Invoke-WebRequest -Uri "https://pypi.org/simple/" -UseBasicParsing -Method Head -TimeoutSec 5 | Out-Null; $online = $true } catch {}
+    if (-not $online) { $Offline = $true; Write-Host "PyPI not reachable over HTTPS -- using the vendored wheelhouse." }
 }
 if ($Offline) {
     if (-not $haveWheels) { throw "-Offline requested but no wheels found in $wheelhouse. Run 'pip download -r requirements.txt -d wheelhouse' on a connected machine first." }
+    # The wheelhouse contains compiled, version-locked wheels (e.g. MarkupSafe and
+    # charset-normalizer for cp314). If this venv's Python doesn't match them, pip
+    # cannot satisfy the pins and aborts the WHOLE -r install -- leaving an empty
+    # venv. Fail now with an actionable message instead of producing that.
+    $pyVer = (& $venvPy -c "import sys;print(f'{sys.version_info[0]}.{sys.version_info[1]}')").Trim()
+    $pyTag = "cp$($pyVer -replace '\.','')"
+    $abi = Get-ChildItem $wheelhouse -Filter *-win_amd64.whl -ErrorAction SilentlyContinue
+    if ($abi -and -not ($abi.Name -match $pyTag)) {
+        $need = ($abi[0].Name -split '-')[-2]                                  # e.g. cp314
+        $needVer = if ($need -match '^cp(\d)(\d+)$') { "$($Matches[1]).$($Matches[2])" } else { $need }
+        throw "The offline wheelhouse's compiled wheels are built for Python $needVer ($need), but this venv uses Python $pyVer ($pyTag). pip cannot satisfy the pinned MarkupSafe/charset-normalizer, so an offline install would install nothing. Fix: install Python $needVer (python.org, 64-bit), delete the venv (Remove-Item -Recurse -Force venv) and re-run setup; OR rebuild the wheelhouse for Python $pyVer on a connected machine: py -3 -m pip download -r requirements.txt -d wheelhouse"
+    }
     Write-Host "Installing pinned dependencies from vendored wheelhouse (offline)..."
     & $venvPy -m pip install --no-index --find-links $wheelhouse -r (Join-Path $RepoDir "requirements.txt")
+    if ($LASTEXITCODE -ne 0) { throw "Dependency install FAILED (offline, exit $LASTEXITCODE). See the pip output above. The server cannot start until this succeeds." }
 } else {
     Write-Host "Installing pinned dependencies from PyPI..."
     & $venvPy -m pip install --upgrade pip --quiet
     & $venvPy -m pip install -r (Join-Path $RepoDir "requirements.txt")
+    if ($LASTEXITCODE -ne 0) { throw "Dependency install FAILED (online, exit $LASTEXITCODE). See the pip output above. The server cannot start until this succeeds." }
 }
+
+# Prove the critical modules are importable. A partial/empty install (e.g. pip
+# aborting on one unsatisfiable pin) must NOT be allowed to reach the "Setup
+# complete" / shortcut-creation steps and masquerade as a working install.
+& $venvPy -c "import waitress, flask, openpyxl" 2>$null
+if ($LASTEXITCODE -ne 0) { throw "Dependencies did not install correctly (cannot import waitress/flask/openpyxl). Setup aborted -- fix the pip errors above and re-run." }
 
 # --- 3. Set BAYTRACKER_DATA (machine scope if admin, else user) -------------
 $env:BAYTRACKER_DATA = $DataDir
@@ -107,6 +131,7 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 # --- 4. Initialize the database (non-destructive) ---------------------------
 Write-Host "Initializing database (safe if it already exists)..."
 & $venvPy (Join-Path $RepoDir "init_db.py")
+if ($LASTEXITCODE -ne 0) { throw "Database initialization FAILED (init_db.py exit $LASTEXITCODE). See the message above." }
 
 # --- 5. Firewall (optional) -------------------------------------------------
 if ($OpenFirewall) {
