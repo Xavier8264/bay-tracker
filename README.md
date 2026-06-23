@@ -68,6 +68,19 @@ venv\Scripts\python.exe init_db.py                             # create + seed t
 > so updating the code can never touch your data. Keep it on a plain local disk — cloud-synced
 > folders corrupt live SQLite files.
 
+**Option C — offline / air-gapped machine (no internet).** The pinned wheels are **vendored in
+`wheelhouse/`** (same principle as `tools/nssm.exe`), so the floor PC never needs PyPI. Get the repo
+onto the machine (a USB copy is fine), then:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Offline
+```
+
+`-Offline` installs every dependency from `wheelhouse/` with `pip --no-index` — zero network. (Plain
+`setup.ps1` also auto-falls-back to the wheelhouse if it can't reach the internet, so this flag is just
+the explicit, guaranteed form.) The wheels are built for Windows 64-bit / Python 3.14; refresh them on a
+connected machine with `py -3 -m pip download -r requirements.txt -d wheelhouse` and commit the result.
+
 ### 3. Launch it on a network-reachable port
 
 **Always launch with `start.ps1`:**

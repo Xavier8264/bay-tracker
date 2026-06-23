@@ -19,6 +19,9 @@
       # Basic install (run from the repo folder):
       powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
+      # Air-gapped install (no internet -- installs from the vendored .\wheelhouse):
+      powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Offline
+
       # Full production install (run an elevated PowerShell):
       powershell -ExecutionPolicy Bypass -File .\setup.ps1 -OpenFirewall -InstallService -ScheduleBackup
 
@@ -30,6 +33,7 @@ param(
     [int]$Port = 5000,                          # the single port to serve on
     [int]$Threads = 32,                         # waitress threads (>= number of TVs + console + headroom)
     [string]$ServiceName = "BayTracker",
+    [switch]$Offline,                            # install deps from the vendored .\wheelhouse (no internet)
     [switch]$OpenFirewall,                       # add the inbound firewall rule (needs admin)
     [switch]$InstallService,                     # install the NSSM auto-start service (needs admin)
     [switch]$ScheduleBackup,                     # register a daily DB-backup scheduled task (needs admin)
@@ -69,9 +73,24 @@ if (-not (Test-Path $venvPy)) {
     Write-Host "Creating virtual environment..."
     if ($python -match "py.exe$") { & $python -3 -m venv venv } else { & $python -m venv venv }
 }
-Write-Host "Installing pinned dependencies..."
-& $venvPy -m pip install --upgrade pip --quiet
-& $venvPy -m pip install -r (Join-Path $RepoDir "requirements.txt")
+# Offline installs (air-gapped floor PC) pull from the vendored .\wheelhouse so
+# they never reach PyPI; -Offline is auto-enabled if the wheelhouse is present
+# and no network is reachable, so the documented online flow is unchanged.
+$wheelhouse = Join-Path $RepoDir "wheelhouse"
+$haveWheels = (Test-Path $wheelhouse) -and (@(Get-ChildItem $wheelhouse -Filter *.whl -ErrorAction SilentlyContinue).Count -gt 0)
+if (-not $Offline -and $haveWheels) {
+    $online = Test-Connection -ComputerName "pypi.org" -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $online) { $Offline = $true; Write-Host "No internet detected -- using the vendored wheelhouse." }
+}
+if ($Offline) {
+    if (-not $haveWheels) { throw "-Offline requested but no wheels found in $wheelhouse. Run 'pip download -r requirements.txt -d wheelhouse' on a connected machine first." }
+    Write-Host "Installing pinned dependencies from vendored wheelhouse (offline)..."
+    & $venvPy -m pip install --no-index --find-links $wheelhouse -r (Join-Path $RepoDir "requirements.txt")
+} else {
+    Write-Host "Installing pinned dependencies from PyPI..."
+    & $venvPy -m pip install --upgrade pip --quiet
+    & $venvPy -m pip install -r (Join-Path $RepoDir "requirements.txt")
+}
 
 # --- 3. Set BAYTRACKER_DATA (machine scope if admin, else user) -------------
 $env:BAYTRACKER_DATA = $DataDir
