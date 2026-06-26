@@ -90,5 +90,10 @@ Write-Host ""
 switch ($code) {
     0       { Write-Host "=== Update to $latest complete and healthy. ===" -ForegroundColor Green }
     1       { Write-Warning "Update failed its health check and was rolled back to the previous version, which is healthy again. The pre-update DB backup is in BAYTRACKER_DATA\backups." }
+    3       { Write-Host "=== Update to $latest deployed. ===" -ForegroundColor Green
+              Write-Host "This PC runs the server manually (no Windows service), so finish the update by restarting it:" -ForegroundColor Yellow
+              Write-Host "  1. Stop the server's console window (Ctrl+C, or close it)." -ForegroundColor Yellow
+              Write-Host "  2. Double-click the 'Start Bay Tracker Server' desktop icon." -ForegroundColor Yellow }
+    4       { Write-Warning "The new version $latest failed to deploy, so the code was rolled back to the previous version. Restart the server to resume it. The pre-update DB backup is safe in BAYTRACKER_DATA\backups." }
     default { Write-Warning "Update ran into trouble (exit $code). Read the messages above; the pre-update DB backup is safe in BAYTRACKER_DATA\backups." }
 }
