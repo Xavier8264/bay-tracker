@@ -151,17 +151,30 @@ if ($InstallService) {
         Write-Warning "Alternatively, use Task Scheduler -- see README.md."
     } else {
         Write-Host "Installing Windows service '$ServiceName' (auto-start, auto-restart)..."
-        & $nssm stop $ServiceName 2>$null
-        & $nssm remove $ServiceName confirm 2>$null
-        # Run waitress (production WSGI server) bound to all interfaces.
-        & $nssm install $ServiceName $venvPy "-m waitress --listen=0.0.0.0:$Port --threads=$Threads app:app"
-        & $nssm set $ServiceName AppDirectory $RepoDir
-        & $nssm set $ServiceName AppEnvironmentExtra "BAYTRACKER_DATA=$DataDir"
-        & $nssm set $ServiceName Start SERVICE_AUTO_START
-        & $nssm set $ServiceName AppStdout (Join-Path $DataDir "service.log")
-        & $nssm set $ServiceName AppStderr (Join-Path $DataDir "service.log")
-        & $nssm set $ServiceName AppExit Default Restart       # auto-restart on crash
-        & $nssm start $ServiceName
+        # nssm reports progress AND 'Can't open service!' on stderr. Under the
+        # script-wide ErrorActionPreference='Stop', a redirected native-stderr line
+        # is wrapped as a terminating NativeCommandError -- which aborted a FIRST
+        # install (no service to stop/remove yet). Relax it for the nssm calls and
+        # only pre-clean when the service actually exists.
+        $eap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+                & $nssm stop $ServiceName | Out-Null
+                & $nssm remove $ServiceName confirm | Out-Null
+            }
+            # Run waitress (production WSGI server) bound to all interfaces.
+            & $nssm install $ServiceName $venvPy "-m waitress --listen=0.0.0.0:$Port --threads=$Threads app:app"
+            & $nssm set $ServiceName AppDirectory $RepoDir
+            & $nssm set $ServiceName AppEnvironmentExtra "BAYTRACKER_DATA=$DataDir"
+            & $nssm set $ServiceName Start SERVICE_AUTO_START
+            & $nssm set $ServiceName AppStdout (Join-Path $DataDir "service.log")
+            & $nssm set $ServiceName AppStderr (Join-Path $DataDir "service.log")
+            & $nssm set $ServiceName AppExit Default Restart       # auto-restart on crash
+            & $nssm start $ServiceName
+        } finally {
+            $ErrorActionPreference = $eap
+        }
         Write-Host "Service '$ServiceName' installed and started." -ForegroundColor Green
     }
 }

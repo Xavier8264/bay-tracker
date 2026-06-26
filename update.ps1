@@ -104,8 +104,8 @@ catch {
             Write-Host "The database backup from step 1 is in BAYTRACKER_DATA\backups if you need it."
             exit 1
         } else {
-            Write-Error "ROLLBACK ALSO FAILED A HEALTH CHECK. Investigate immediately. " +
-                        "The pre-update database backup is safe in BAYTRACKER_DATA\backups."
+            Write-Error ("ROLLBACK ALSO FAILED A HEALTH CHECK. Investigate immediately. " +
+                         "The pre-update database backup is safe in BAYTRACKER_DATA\backups.")
             exit 2
         }
     }
