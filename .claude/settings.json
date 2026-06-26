@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git -C $repo cat-file -s HEAD:tools/nssm.exe)",
+      "PowerShell($repo='c:\\\\Users\\\\jprun\\\\OneDrive\\\\Documents\\\\Bay Tracking Display')",
+      "PowerShell(git -C $repo push origin main 2>&1)",
+      "PowerShell(git -C $repo tag -a v1.5.2 43a083b -m \"v1.5.2: rollback-message + first-install fixes, vendored nssm.exe\" 2>&1)",
+      "PowerShell(git -C $repo push origin v1.5.2 2>&1)",
+      "PowerShell(git -C $repo ls-remote origin refs/heads/main)",
+      "PowerShell(git -C $repo ls-remote --tags origin v1.5.3)",
+      "PowerShell(git -C $repo rev-parse --short \"v1.5.3^{commit}\")",
+      "PowerShell(git -C $repo rev-parse --short HEAD)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\jprun\\.claude\\projects\\c--Users-jprun-OneDrive-Documents-Bay-Tracking-Display\\memory"
+    ]
+  }
+}
