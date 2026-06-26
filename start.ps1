@@ -115,9 +115,26 @@ if ($Demo) {
 
 # --- 4. Launch -------------------------------------------------------------------
 $env:BAYTRACKER_DATA = $DataDir
-$ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-         Where-Object { $_.IPAddress -notmatch "^(127\.|169\.254\.)" } |
-         Select-Object -First 1).IPAddress
+# Prefer the adapter that owns the default route -- the address other machines
+# actually reach this PC on. Hyper-V/WSL/VMware virtual NICs (often 172.x) have
+# no gateway, so this skips them and picks the real Wi-Fi/Ethernet IP. Falls
+# back to the first real IPv4 if there's no default route (e.g. isolated LAN).
+$ipv4 = $null
+try {
+    $ifIndex = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+               Sort-Object RouteMetric, InterfaceMetric |
+               Select-Object -First 1 -ExpandProperty ifIndex
+    if ($ifIndex) {
+        $ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $ifIndex -ErrorAction Stop |
+                 Where-Object { $_.IPAddress -notmatch "^(127\.|169\.254\.)" } |
+                 Select-Object -First 1).IPAddress
+    }
+} catch { }
+if (-not $ipv4) {
+    $ipv4 = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+             Where-Object { $_.IPAddress -notmatch "^(127\.|169\.254\.)" } |
+             Select-Object -First 1).IPAddress
+}
 if (-not $ipv4) { $ipv4 = "<this-pc-ip>" }
 
 Write-Host "=== Bay Tracking server ===" -ForegroundColor Cyan
