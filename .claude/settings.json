@@ -9,7 +9,19 @@
       "PowerShell(git -C $repo ls-remote origin refs/heads/main)",
       "PowerShell(git -C $repo ls-remote --tags origin v1.5.3)",
       "PowerShell(git -C $repo rev-parse --short \"v1.5.3^{commit}\")",
-      "PowerShell(git -C $repo rev-parse --short HEAD)"
+      "PowerShell(git -C $repo rev-parse --short HEAD)",
+      "PowerShell(gh run list --workflow=python-package.yml --limit 10)",
+      "PowerShell(git ls-files | ForEach-Object { \\($_ -split '/'\\)[0] } | Sort-Object -Unique)",
+      "PowerShell(git remote -v; $runs = Invoke-RestMethod -Uri \"https://api.github.com/repos/Xavier8264/bay-tracker/actions/workflows/python-package.yml/runs?per_page=5\"; $runs.workflow_runs | Select-Object id, run_number, conclusion, head_branch, created_at | Format-Table -AutoSize)",
+      "PowerShell($jobs = Invoke-RestMethod -Uri \"https://api.github.com/repos/Xavier8264/bay-tracker/actions/runs/28794179220/jobs\"; $jobs.jobs | ForEach-Object { \"JOB: $\\($_.name\\) => $\\($_.conclusion\\)\"; $_.steps | ForEach-Object { \"   step: $\\($_.name\\) => $\\($_.conclusion\\)\" } })",
+      "PowerShell($jobs = Invoke-RestMethod -Uri \"https://api.github.com/repos/Xavier8264/bay-tracker/actions/runs/28794179220/jobs\"; $jobId = \\($jobs.jobs | Where-Object { $_.name -eq 'build \\(3.11\\)' }\\).id; try { $log = Invoke-WebRequest -Uri \"https://api.github.com/repos/Xavier8264/bay-tracker/actions/jobs/$jobId/logs\" -MaximumRedirection 5 -UseBasicParsing; $log.Content.Substring\\([Math]::Max\\(0, $log.Content.Length - 6000\\)\\) } catch { \"LOG FETCH FAILED: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests -x -q 2>$null; \"EXIT: $LASTEXITCODE\")",
+      "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests -q)",
+      "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe -m pip install pytest --quiet --disable-pip-version-check)",
+      "PowerShell(Get-Content venv\\\\pyvenv.cfg; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_time_engine.py > $null; \"time_engine EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_undo.py > $null; \"undo EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_notify.py > $null; \"notify EXIT: $LASTEXITCODE\")",
+      "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_time_engine.py > $null; \"time_engine EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_undo.py > $null; \"undo EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_notify.py > $null; \"notify EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests -q)",
+      "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests\\\\test_zz_conftest_probe.py -q; \"probe pytest EXIT: $LASTEXITCODE\"; Remove-Item tests\\\\test_zz_conftest_probe.py -Confirm:$false; & .\\\\venv\\\\Scripts\\\\python.exe -m pip install flake8 --quiet --disable-pip-version-check; & .\\\\venv\\\\Scripts\\\\python.exe -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv,wheelhouse; \"flake8 EXIT: $LASTEXITCODE\")",
+      "PowerShell(git add .github/workflows/python-package.yml tests/test_time_engine.py tests/test_notify.py tests/conftest.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\jprun\\.claude\\projects\\c--Users-jprun-OneDrive-Documents-Bay-Tracking-Display\\memory"
