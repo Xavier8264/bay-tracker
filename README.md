@@ -452,8 +452,8 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1 -Demo
 
 On first use this generates a **separate, disposable demo database**
 (`C:\BayTrackerData_demo`) with three weeks of plausible history — runs, moves, delays with
-notes, completions, a configured schedule — plus a busy "right now" screen (several
-bays running, one delayed, units in queue). Every screen shows a **DEMO DATA** badge so the
+notes, completions, a configured schedule — plus a busy "right now" screen (all 12 bays
+running, each with a real unit number and note). Every screen shows a **DEMO DATA** badge so the
 example data can never pass for the real thing.
 
 - **Back to live:** restart without `-Demo` (`.\start.ps1 -Force`). That's it — the server

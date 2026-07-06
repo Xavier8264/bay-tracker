@@ -19,4 +19,4 @@ WSGI server can import it as ``app:app`` (see Appendix B1 of the spec).
 
 # Single source of truth for the version string. `update.ps1` deploys git tags
 # like "v1.0.0"; this constant is what /healthz and the footer report.
-__version__ = "1.5.3"
+__version__ = "1.5.4"

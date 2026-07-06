@@ -54,12 +54,30 @@ REASONS = [
 ]
 
 PRODUCTS = [
-    ("0347",  "Control cabinet, 60A"),
-    ("0512",  "Control cabinet, 100A"),
-    ("1108",  "Operator pedestal"),
-    ("2204",  "Conveyor drive unit"),
-    ("7741",  "Hydraulic power pack"),
-    ("8830",  "Custom skid frame"),
+    ("448903", ""),
+    ("448914", ""),
+    ("448917", ""),
+    ("427810", ""),
+    ("448306", ""),
+    ("427811", ""),
+]
+
+# The live "right now" snapshot: one fixed (product_number, component_label)
+# per bay, in bay order 1-12. Every bay is shown occupied with this exact
+# real unit/note pair rather than a randomly-picked one.
+TODAY_BAY_UNITS = [
+    ("448903", "Backend"),
+    ("448914", "B"),
+    ("448914", "Stacked"),
+    ("448917", ""),
+    ("448903", "T"),
+    ("448914", "T"),
+    ("427810", ""),
+    ("448917", ""),
+    ("448903", "B"),
+    ("448306", ""),
+    ("427811", ""),
+    ("448917", ""),
 ]
 
 ROSTER = [("JP", "Jordan P."), ("MT", "Mike T."), ("DK", "Dana K."),
@@ -193,9 +211,17 @@ class Sim:
 
 
 def _simulate_day(sim: Sim, day, is_today: bool, now: datetime):
-    """Lay out one workday of activity. On 'today', leave open runs/queue/delay."""
+    """Lay out one workday of activity. Today's window is clamped to 'now' so
+    nothing is future-dated; the live 'right now' snapshot is layered on
+    separately by _today_live_snapshot()."""
     day_start = datetime(day.year, day.month, day.day, 6, 0)
     day_end = datetime(day.year, day.month, day.day, 16, 30)
+    if is_today:
+        # Leave a gap ahead of 'now' at least as wide as the live snapshot's
+        # max lookback (see _today_live_snapshot) so nothing here can ever be
+        # timestamped after a snapshot START on the same bay -- that ordering
+        # inversion would let a stray UNIT_COMPLETE close the snapshot's run.
+        day_end = min(day_end, now - timedelta(minutes=290))
 
     for _ in range(RNG.randint(3, 5)):
         wo = sim.next_wo()
@@ -210,12 +236,6 @@ def _simulate_day(sim: Sim, day, is_today: bool, now: datetime):
         if end <= start:
             sim.release(bay, start)
             continue
-
-        # On the current day, runs that would still be going stay OPEN.
-        if is_today and end >= now:
-            sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
-                     initials=who)
-            continue  # bay stays held -> open run on the live screen
 
         sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
                  initials=who)
@@ -243,65 +263,19 @@ def _simulate_day(sim: Sim, day, is_today: bool, now: datetime):
             sim.release(bay, end)
 
 
-def _today_extras(sim: Sim, day, now: datetime):
-    """Make the live screen look mid-shift: several bays RUNNING, one DELAYED,
-    one DONE (work finished, part still in the bay), and one merged unit (two
-    parallel halves joined, now continuing in a single bay with total > elapsed).
-    Anchored to the afternoon of the most recent workday so it always looks busy.
-    None of these are released -- they stay open on the live board."""
-    anchor = min(now, datetime(day.year, day.month, day.day, 15, 0))
-
-    # four bays currently RUNNING (open runs at different elapsed times)
-    for _ in range(4):
-        wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
-        start = anchor - timedelta(minutes=RNG.randint(45, 280))
-        bay = sim.grab_bay(start)
-        if bay is None:
-            continue
-        sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
-                 initials=RNG.choice(ROSTER)[0])
-
-    # one bay currently DELAYED (open delay on an open run)
-    wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
-    start = anchor - timedelta(minutes=RNG.randint(150, 240))
-    bay = sim.grab_bay(start)
-    if bay is not None:
-        r = RNG.choice(sim.reasons)
-        sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
-                 initials=RNG.choice(ROSTER)[0])
-        d_start = anchor - timedelta(minutes=RNG.randint(20, 50))
-        sim.emit(d_start, "DELAY_START", bay_id=bay, work_order=wo, product_number=pn,
-                 delay_reason_id=r["id"], reason_label=r["label"], division=r["division"],
-                 in_out_of_control=r["in_out_of_control"],
-                 note=RNG.choice(DELAY_NOTES[r["label"]]),
-                 initials=RNG.choice(ROSTER)[0])
-
-    # one bay DONE: work finished, the part still sits in the bay (amber).
-    wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
-    start = anchor - timedelta(minutes=RNG.randint(120, 200))
-    bay = sim.grab_bay(start)
-    if bay is not None:
-        sim.emit(start, "START", bay_id=bay, work_order=wo, product_number=pn,
-                 initials=RNG.choice(ROSTER)[0])
-        sim.emit(anchor - timedelta(minutes=RNG.randint(15, 45)), "COMPLETE_BAY",
-                 bay_id=bay, work_order=wo, product_number=pn, initials=RNG.choice(ROSTER)[0])
-
-    # one MERGED unit: two halves started in parallel, then joined into one bay.
-    # The continuing bay shows total > elapsed (the parallel time is summed).
-    wo, pn = sim.next_wo(), RNG.choice(PRODUCTS)[0]
-    t0 = anchor - timedelta(minutes=RNG.randint(150, 210))
-    ba = sim.grab_bay(t0)
-    bb = sim.grab_bay(t0, exclude=(ba,)) if ba is not None else None
-    if ba is not None and bb is not None:
-        who = RNG.choice(ROSTER)[0]
-        sim.emit(t0, "START", bay_id=ba, work_order=wo, product_number=pn,
-                 component_label="Half A", initials=who)
-        sim.emit(t0, "START", bay_id=bb, work_order=wo, product_number=pn,
-                 component_label="Half B", initials=who)
-        mate_t = anchor - timedelta(minutes=RNG.randint(60, 90))
-        sim.emit(mate_t, "MATE", bay_id=ba, target_bay_id=bb, work_order=wo,
-                 product_number=pn, initials=RNG.choice(ROSTER)[0])
-        sim.release(bb, mate_t)   # bb frees; ba continues (stays open)
+def _today_live_snapshot(sim: Sim, bay_ids_ordered, now: datetime):
+    """Make the live screen show every bay currently RUNNING, each with its
+    fixed real unit/component-label (bay order 1-12, see TODAY_BAY_UNITS).
+    Staggered start times so elapsed durations vary. None of these are
+    released -- they stay open on the live board."""
+    for bay, (pn, label) in zip(bay_ids_ordered, TODAY_BAY_UNITS):
+        wo = sim.next_wo()
+        start = now - timedelta(minutes=RNG.randint(20, 280))
+        fields = dict(bay_id=bay, work_order=wo, product_number=pn,
+                      initials=RNG.choice(ROSTER)[0])
+        if label:
+            fields["component_label"] = label
+        sim.emit(start, "START", **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +331,7 @@ def main() -> None:
             "FROM delay_reasons r JOIN divisions d ON r.division_id = d.id "
             "WHERE r.is_other = 0;").fetchall()
         bay_ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM bays WHERE active = 1;").fetchall()]
+            "SELECT id FROM bays WHERE active = 1 ORDER BY sort_order;").fetchall()]
 
         # --- the history itself ---
         now = datetime.now().replace(microsecond=0)
@@ -367,7 +341,7 @@ def main() -> None:
             is_today = (day == days[-1])
             _simulate_day(sim, day, is_today, now)
             if is_today:
-                _today_extras(sim, day, now)
+                _today_live_snapshot(sim, bay_ids, now)
 
         # Append in strict chronological order so replay (which walks insertion
         # order) sees a causally valid log, exactly like real life.
