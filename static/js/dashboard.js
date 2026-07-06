@@ -42,7 +42,7 @@
     return `<div class="times">${cols}</div>`;
   }
 
-  function tileHTML(t) {
+  function tileHTML(t, demoMode) {
     const cls = "tile " + t.status.toLowerCase();
     const state = `<span class="state-label"><span class="icon">${ICON[t.status]}</span>${LABEL[t.status]}</span>`;
     const head = `<div class="tile-head"><span class="bay-name">${BT.escapeHtml(t.name)}</span>${state}</div>`;
@@ -60,7 +60,10 @@
     const hasProduct = !!t.product_number;
     const primary = BT.escapeHtml(hasProduct ? t.product_number : t.work_order);
     const subParts = [];
-    if (hasProduct) subParts.push(t.work_order);
+    // Demo data's work order numbers are fabricated placeholders, not real
+    // identifiers -- keep them out of the demo screen (still tracked
+    // internally; real work orders still show for the real log).
+    if (hasProduct && !demoMode) subParts.push(t.work_order);
     if (t.component_label) subParts.push(t.component_label);
     const sub = subParts.map(BT.escapeHtml).join(" · ");
     const parallel = t.occupies_two ? `<span class="parallel-chip">∥ 2 bays</span>` : "";
@@ -137,11 +140,11 @@
       // Top row: one cell per column; an extra bay sits in its chosen column.
       for (let c = 1; c <= cols; c++) {
         const ex = extras.find(e => e.grid_col === c);
-        html += ex ? tileHTML(ex) : emptyCellHTML();
+        html += ex ? tileHTML(ex, snap.demo_mode) : emptyCellHTML();
       }
     }
     // Standard bays fill the remaining rows in fixed order.
-    standard.forEach(t => { html += tileHTML(t); });
+    standard.forEach(t => { html += tileHTML(t, snap.demo_mode); });
     grid.innerHTML = html;
 
     // mode banner (ON BREAK / OFF-HOURS)
