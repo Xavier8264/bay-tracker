@@ -25,6 +25,7 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid as _uuid
 
 # Make the repo importable and point the app at a temp data dir BEFORE import.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,14 +46,13 @@ def check(name, got, want):
 
 
 def fresh_conn():
-    # All tests share one temp DB file, so wipe the tables we touch and reset the
-    # AUTOINCREMENT counters -- that keeps each test isolated and lets 'WHERE id=1'
-    # mean "the one row this test created".
-    conn = db.connect()
+    # An ISOLATED database per test (a unique file, like test_undo.py): ids start
+    # at 1 so 'WHERE id=1' means "the one row this test created", and -- because
+    # pytest imports every test module into ONE process -- no other module can
+    # ever see this database (the old shared-file version deleted the seeded
+    # bays that test_time_engine.py depends on).
+    conn = db.connect(os.path.join(_TMP, f"t_{_uuid.uuid4().hex}.db"))
     db.create_schema(conn)
-    for t in ("notification_outbox", "recipients", "events", "bays"):
-        conn.execute(f"DELETE FROM {t};")
-    conn.execute("DELETE FROM sqlite_sequence;")
     conn.execute("INSERT INTO bays (id, name, sort_order) VALUES (7,'Bay 7',7),(8,'Bay 8',8);")
     conn.commit()
     return conn

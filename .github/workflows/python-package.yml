@@ -1,5 +1,22 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+# CI for the Bay Tracking System.
+#
+# Two deliberate departures from the stock GitHub Python template, both load-
+# bearing -- the template version of this file failed on every run:
+#
+# 1. Python version: 3.14 ONLY. requirements.txt is exactly pinned, captured on
+#    Python 3.14 (see its header), and the production PC runs 3.14. Older
+#    interpreters cannot even install the pins (click 8.4+ needs >= 3.10), so a
+#    3.9/3.10/3.11 matrix guarantees failures for versions we never deploy.
+#
+# 2. Tests run as standalone scripts, not via one pytest process. Each file in
+#    tests/ is a self-contained script by design ("no pytest required"): it
+#    points BAYTRACKER_DATA at its own temp folder BEFORE importing the app,
+#    runs, and exits non-zero on any failure. Running all of them inside a
+#    single pytest process made them share one database (config.DATA_DIR is
+#    resolved once at first import) and trample each other's seeded bays.
+#    One process per file preserves the isolation the scripts were built on.
+#    (tests/conftest.py additionally makes a local `pytest` run behave, but the
+#    per-process scripts below are the canonical gate.)
 
 name: Python package
 
@@ -9,32 +26,41 @@ on:
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
-
+        # ubuntu catches anything Linux-specific in a dev clone;
+        # windows matches the production floor PC.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash   # same fail-fast multi-line step behaviour on both OSes
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.14"
+        cache: pip
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
+        python -m pip install flake8
+        pip install -r requirements.txt
+    - name: Lint with flake8 (hard errors only)
       run: |
-        # stop the build if there are Python syntax errors or undefined names
+        # Syntax errors and undefined names fail the build; style is not policed.
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
+    - name: Run test suites (one process per file, as designed)
       run: |
-        pytest
+        python tests/test_time_engine.py
+        python tests/test_undo.py
+        python tests/test_notify.py

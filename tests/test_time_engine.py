@@ -21,6 +21,7 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid as _uuid
 from datetime import datetime
 
 # Make the repo importable and point the app at a temp data dir BEFORE import.
@@ -47,7 +48,15 @@ def check(name, got, want):
 
 
 def fresh_conn():
-    conn = db.connect()
+    """An ISOLATED database per test (a unique file), like test_undo.py.
+
+    pytest imports every test module into ONE process, so the default
+    db.connect() path (frozen at first import of baytracker.config) would be
+    shared across modules -- and test_notify.py replaces the seeded bays in
+    its database. A unique file per test makes the isolation unconditional.
+    """
+    state.invalidate_cache()   # the replay cache is keyed by max event id; reset per DB
+    conn = db.connect(os.path.join(_TMP, f"t_{_uuid.uuid4().hex}.db"))
     db.create_schema(conn)
     bootstrap.seed(conn)
     # 24/7 operating, no breaks, unless a test overrides it.
