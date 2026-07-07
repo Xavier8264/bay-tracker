@@ -97,6 +97,16 @@ html, body {
 .topbar .undo-btn.ready:hover { filter: brightness(1.08); }
 .topbar .undo-btn:disabled { opacity: .4; }
 
+/* EHS first-aid button (far right of the top bar, every page): a white tile
+   with a red cross. Opens the incident report in a small popup window. */
+.topbar .firstaid-btn {
+  flex: none; width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+}
+.topbar .firstaid-btn:hover { border-color: var(--delayed); filter: brightness(.94); }
+.topbar .firstaid-btn svg { width: 20px; height: 20px; fill: var(--delayed); }
+
 /* ---- offline / connection indicator ----------------------------------- */
 #offline-banner {
   display: none;

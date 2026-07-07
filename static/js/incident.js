@@ -175,7 +175,14 @@
   });
 
   // ---- reset (Cancel / Report another) ----
-  $("ir-cancel").addEventListener("click", reset);
+  // Opened as the topbar first-aid popup (?popup=1): Cancel closes the whole
+  // window -- the operator hit the icon by mistake and nothing was sent yet.
+  // (Cancel is only visible pre-submit; a sent report is never discarded.)
+  const isPopup = new URLSearchParams(location.search).get("popup") === "1";
+  $("ir-cancel").addEventListener("click", () => {
+    if (isPopup) window.close();
+    else reset();
+  });
   els.newBtn.addEventListener("click", reset);
 
   function reset() {

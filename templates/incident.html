@@ -2,6 +2,10 @@
 {% block title %}Report an Incident{% endblock %}
 {% set active_page = 'incident' %}
 
+{# When opened as the topbar first-aid popup (?popup=1) the nav bar is dropped:
+   the small window is only the form, and Cancel closes the window instead. #}
+{% block topbar %}{% if not popup %}{{ super() }}{% endif %}{% endblock %}
+
 {% block content %}
 {# EHS accident / near-miss report. Recreated from the Bay Tracker Design System
    "Incident Report" template. The chooser locks once picked (to prevent

@@ -157,3 +157,19 @@ const BT = (function () {
   return { fmtElapsed, fmtAgo, liveElapsed, liveSeconds, connect, startTicker,
            post, get, escapeHtml, getSnapshot: () => lastSnapshot };
 })();
+
+/* ---- EHS first-aid button (topbar, every page) ----------------------------
+   Opens the incident report in a small popup window instead of navigating the
+   page away, so a console/board left on screen keeps running. Reusing the
+   window name focuses the already-open report instead of stacking new ones. */
+(function () {
+  const btn = document.getElementById("incident-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const w = 720, h = 900;
+    const left = Math.max(0, Math.round((screen.width - w) / 2));
+    const top = Math.max(0, Math.round((screen.height - h) / 2));
+    window.open(btn.dataset.url, "bt-incident",
+      `popup=yes,width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+  });
+})();

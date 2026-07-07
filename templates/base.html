@@ -15,7 +15,6 @@
   <div class="topbar">
     <h1>Bay Tracking</h1>
     <a href="{{ url_for('console') }}" class="{{ 'active' if active_page=='console' }}">Console</a>
-    <a href="{{ url_for('incident') }}" class="{{ 'active' if active_page=='incident' }}">Incident</a>
     <a href="{{ url_for('dashboard') }}" class="{{ 'active' if active_page=='dashboard' }}">Dashboard</a>
     <a href="{{ url_for('stats') }}" class="{{ 'active' if active_page=='stats' }}">Stats</a>
     <a href="{{ url_for('admin') }}" class="{{ 'active' if active_page=='admin' }}">Admin</a>
@@ -28,6 +27,15 @@
     <span class="spacer"></span>
     <span id="demo-tag" class="demo-tag">DEMO DATA</span>
     <span id="conn-pill" class="status-pill">LIVE</span>
+    {% if active_page != 'incident' %}
+    {# EHS first-aid button: opens the incident report in a small popup window
+       so the console/board underneath keeps running. Hidden on /incident. #}
+    <button id="incident-btn" class="firstaid-btn" type="button"
+            data-url="{{ url_for('incident') }}?popup=1"
+            title="Report an incident (EHS)" aria-label="Report an incident">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.3 4h5.4v5.3H20v5.4h-5.3V20H9.3v-5.3H4V9.3h5.3z"/></svg>
+    </button>
+    {% endif %}
   </div>
   {% endblock %}
 

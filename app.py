@@ -96,6 +96,10 @@ def create_app() -> Flask:
         return render_template(
             "incident.html",
             version=__version__,
+            # ?popup=1 = opened from the topbar first-aid button in a small
+            # popup window: the template drops the nav bar and Cancel closes
+            # the window instead of resetting the form.
+            popup=request.args.get("popup") == "1",
             locations=[b["name"] for b in bays] + incidents.EXTRA_LOCATIONS,
             roster=[r["initials"] for r in roster],
             severities=incidents.SEVERITIES,
