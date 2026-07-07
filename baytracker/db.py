@@ -29,7 +29,9 @@ from . import config
 #   v2 (2026-06): added recipients + notification_outbox (delay notifications).
 #   v3 (2026-06): added events.action_group (groups the rows of one action so the
 #                 console Undo can reverse a multi-row action atomically).
-SCHEMA_VERSION = 3
+#   v4 (2026-07): added incidents (EHS accident / near-miss log) + notification_outbox
+#                 incident_id/kind columns (leadership alerts reuse the outbox + worker).
+SCHEMA_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +198,44 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
     last_error      TEXT,
     next_attempt_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
     created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-    sent_at         TEXT
+    sent_at         TEXT,
+    -- Incident (EHS) alerts reuse this same outbox + background worker. On an
+    -- incident row these two are set and delay_event_id is 0 -- a sentinel that
+    -- never collides with a real delay (events.id autoincrements from 1).
+    incident_id     INTEGER,                                -- incidents.id  (NULL on delay rows)
+    kind            TEXT                                    -- 'PRELIMINARY'|'DETAILED' (NULL on delay rows)
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending
     ON notification_outbox(status, next_attempt_at);
+
+-- =====================================================================
+-- incidents : the EHS accident / near-miss log. A standalone append-only
+-- record that, unlike `events`, does NOT drive the bay state machine -- so a
+-- single controlled UPDATE to fill in details after an immediate preliminary
+-- alert is allowed (see baytracker/incidents.py). Leadership notifications for
+-- an incident are written to notification_outbox (incident_id + kind set,
+-- delay_event_id = 0) and delivered by the same background worker as delays.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS incidents (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                TEXT    NOT NULL,               -- when the record was filed (server-side)
+    type              TEXT    NOT NULL,               -- 'ACCIDENT' | 'NEAR_MISS'
+    occurred_at       TEXT,                           -- when it happened (from the form)
+    location          TEXT,
+    reported_by       TEXT,                           -- initials
+    severity          TEXT,                           -- accident: First aid only | Recordable | ...
+    potential         TEXT,                           -- near miss: Low | Medium | High
+    person            TEXT,                           -- accident: person involved
+    injury            TEXT,                           -- accident: injury / body part
+    medical           TEXT,                           -- accident: medical attention
+    what_happened     TEXT,                           -- required at submit (nullable so a preliminary-only row can exist)
+    immediate_action  TEXT,
+    equipment         TEXT,
+    prelim_sent_at    TEXT,                           -- set when an immediate preliminary alert was fired
+    finalized_at      TEXT,                           -- set when the full detailed report was submitted
+    created_at        TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_ts ON incidents(ts);
 
 -- =====================================================================
 -- schema_version : single-row table recording the applied schema version so
@@ -246,6 +282,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
     # self-healing even if migrate.py hasn't been run -- same spirit as the
     # data-folder self-heal in connect(). migrate.py applies the same change.
     _ensure_event_columns(conn)
+    _ensure_outbox_columns(conn)
     # Record the schema version exactly once.
     row = conn.execute("SELECT version FROM schema_version LIMIT 1;").fetchone()
     if row is None:
@@ -258,6 +295,18 @@ def _ensure_event_columns(conn: sqlite3.Connection) -> None:
     existing = {r["name"] for r in conn.execute("PRAGMA table_info(events);").fetchall()}
     if "action_group" not in existing:
         conn.execute("ALTER TABLE events ADD COLUMN action_group TEXT;")
+
+
+def _ensure_outbox_columns(conn: sqlite3.Connection) -> None:
+    """Add the incident-alert columns to an already-existing notification_outbox
+    (idempotent). Fresh installs get them from SCHEMA_SQL; databases created
+    before v4 get them here (and via the matching migrate.py migration)."""
+    existing = {r["name"]
+                for r in conn.execute("PRAGMA table_info(notification_outbox);").fetchall()}
+    if "incident_id" not in existing:
+        conn.execute("ALTER TABLE notification_outbox ADD COLUMN incident_id INTEGER;")
+    if "kind" not in existing:
+        conn.execute("ALTER TABLE notification_outbox ADD COLUMN kind TEXT;")
 
 
 # ---------------------------------------------------------------------------

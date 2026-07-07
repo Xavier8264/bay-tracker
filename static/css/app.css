@@ -494,3 +494,100 @@ button.saved-flash, .btn.saved-flash {
 .unlock-wrap { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
 .unlock-card { width: 340px; text-align:center; }
 .unlock-card .lock { font-size: 44px; }
+
+/* ===========================================================================
+   Incident report (/incident) -- EHS accident / near-miss report.
+   Recreated from the Bay Tracker Design System "Incident Report" template; the
+   design's --bt-* tokens are mapped to this app's real :root variables
+   (--bt-bg -> --bg, --bt-delayed -> --delayed, etc.).
+   ========================================================================== */
+.ir-wrap { max-width: 680px; padding: 22px 24px; }
+
+/* Robust show/hide: [hidden] must always win over the class-based display
+   rules below, and type-scoped fields hide unless their type is chosen. */
+.ir-wrap [hidden] { display: none !important; }
+.ir-wrap:not(.is-accident) .ir-acc-only { display: none !important; }
+.ir-wrap:not(.is-nearmiss) .ir-nm-only { display: none !important; }
+
+/* header */
+.ir-head { display:flex; align-items:center; gap:12px; margin-bottom: 18px; }
+.ir-logo { position:relative; display:inline-flex; width:30px; height:30px; border-radius:7px;
+  background: var(--running); flex:none; }
+.ir-logo span { position:absolute; top:50%; left:50%; background:#fff; border-radius:2px; }
+.ir-logo span:nth-child(1) { width:18px; height:6px; transform: translate(-50%,-50%); }
+.ir-logo span:nth-child(2) { width:6px; height:18px; transform: translate(-50%,-50%); }
+.ir-title { font-size:19px; font-weight:800; }
+.ir-sub { font-size:12px; color: var(--muted); }
+.ir-lede { color: var(--muted); font-size:13px; margin-bottom:14px; }
+
+/* chooser */
+.ir-chooser { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+.ir-choice { text-align:left; cursor:pointer; background: var(--panel-2);
+  border:2px solid var(--border); border-radius:10px; padding:14px 16px; color: var(--text);
+  display:flex; flex-direction:column; gap:3px; font: inherit; }
+.ir-choice:hover { border-color: var(--muted); }
+.ir-choice-t { font-size:17px; font-weight:800; }
+.ir-choice-d { font-size:12px; font-weight:500; opacity:.6; }
+
+/* chosen-type banner */
+.ir-typebanner { display:flex; align-items:center; gap:10px; border-radius:10px;
+  padding:12px 16px; margin-bottom:12px; }
+#ir-banner-acc { background: var(--delayed); color:#fff; }
+#ir-banner-nm  { background: var(--warn); color:#1a1205; }
+.ir-tb-t { font-size:16px; font-weight:800; }
+.ir-tb-d { font-size:12px; opacity:.85; }
+
+/* preliminary-alert prompt / confirm / sent */
+.ir-notify { display:flex; align-items:center; gap:12px; background: var(--panel-2);
+  border-radius:8px; padding:10px 12px; flex-wrap:wrap; margin-bottom:12px; }
+.ir-notify-txt { flex:1; min-width:180px; font-size:13px; color: var(--muted); }
+.ir-notify-txt b { color: var(--text); }
+.ir-confirm { background: rgba(214,59,59,.12); border:1px solid var(--delayed);
+  border-radius:8px; padding:12px 14px; margin-bottom:12px; }
+.ir-confirm-txt { font-size:13px; margin-bottom:10px; }
+.ir-confirm-row { display:flex; gap:8px; }
+.ir-prelim-sent { background: rgba(37,184,102,.1); border:1px solid var(--running);
+  border-radius:8px; padding:10px 12px; font-size:13px; color:#bfe8cf; margin-bottom:12px; }
+
+/* fields */
+.ir-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.ir-field { display:flex; flex-direction:column; }
+.ir-col-full { grid-column: 1 / -1; }
+.ir-label { font-size:13px; color: var(--muted); margin:8px 0 4px; }
+.ir-input { font: inherit; font-size:15px; background: var(--panel); color: var(--text);
+  border:1px solid var(--border); border-radius:8px; padding:10px 12px; width:100%;
+  box-sizing:border-box; }
+.ir-input:focus { outline:none; border-color: var(--accent); }
+textarea.ir-input { resize: vertical; }
+.ir-input-initials { width:110px; flex:none; }
+
+/* action buttons */
+.ir-actions { display:flex; gap:10px; margin-top:18px; }
+.ir-btn { font: inherit; font-weight:700; cursor:pointer; background: var(--panel-2);
+  color: var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 16px; }
+.ir-btn:hover { border-color: var(--muted); }
+.ir-btn:disabled { opacity:.45; cursor:default; }
+.ir-btn.sm { padding:7px 12px; font-size:13px; }
+.ir-btn.danger { background: var(--delayed); border-color: var(--delayed); color:#fff; }
+.ir-btn.warn { background: var(--warn); border-color: var(--warn); color:#1a1205; }
+#ir-submit { flex:1; }
+.is-nearmiss #ir-submit { background: var(--warn); border-color: var(--warn); color:#1a1205; }
+.is-accident #ir-submit { background: var(--delayed); border-color: var(--delayed); color:#fff; }
+#ir-submit:disabled { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+
+.ir-hint { font-size:12px; color: var(--muted); margin-top:8px; }
+.ir-hint.is-error { color: var(--bad); }
+
+/* submitted confirmation + queued-message cards */
+.ir-done-head { display:flex; align-items:center; gap:10px; font-size:20px; font-weight:700;
+  color: var(--good); margin-bottom:10px; }
+.ir-done-sub { font-size:14px; color: var(--muted); line-height:1.6; }
+.ir-sent-card { margin-top:12px; background: var(--panel); border:1px solid var(--border);
+  border-left:3px solid var(--good); border-radius:10px; padding:10px 12px; }
+.ir-sent-card.prelim { border-left-color: var(--delayed); }
+.ir-sent-meta { font-size:11px; color: var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px; }
+.ir-sent-body { font-size:12.5px; white-space:pre-wrap; line-height:1.5; color:#dfe7ee; }
+
+@media (max-width: 560px) {
+  .ir-chooser, .ir-grid { grid-template-columns: 1fr; }
+}

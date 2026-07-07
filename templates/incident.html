@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Report an Incident{% endblock %}
+{% set active_page = 'incident' %}
+
+{% block content %}
+{# EHS accident / near-miss report. Recreated from the Bay Tracker Design System
+   "Incident Report" template. The chooser locks once picked (to prevent
+   duplicate alerts); accidents can fire an immediate preliminary alert before
+   the form is filled. All the interactivity lives in incident.js. #}
+<div class="ir-wrap" id="ir-wrap">
+
+  <div class="ir-head">
+    <span class="ir-logo" aria-hidden="true"><span></span><span></span></span>
+    <div>
+      <div class="ir-title">Report an incident</div>
+      <div class="ir-sub">EHS · notifies leadership</div>
+    </div>
+  </div>
+
+  <div class="ir-lede">First, choose what happened. Selection locks once chosen, to prevent duplicate alerts.</div>
+
+  <!-- 1. Chooser -------------------------------------------------------- -->
+  <div class="ir-chooser" id="ir-chooser">
+    <button type="button" class="ir-choice" data-type="ACCIDENT">
+      <span class="ir-choice-t">⚠ Accident</span>
+      <span class="ir-choice-d">Injury or property damage</span>
+    </button>
+    <button type="button" class="ir-choice" data-type="NEAR_MISS">
+      <span class="ir-choice-t">◇ Near miss</span>
+      <span class="ir-choice-d">No injury — could have</span>
+    </button>
+  </div>
+
+  <!-- Chosen-type banner (replaces the chooser once locked) ------------- -->
+  <div class="ir-typebanner ir-acc-only" id="ir-banner-acc" hidden>
+    <span class="ir-tb-t">⚠ Accident</span><span class="ir-tb-d">Injury or property damage</span>
+  </div>
+  <div class="ir-typebanner ir-nm-only" id="ir-banner-nm" hidden>
+    <span class="ir-tb-t">◇ Near miss</span><span class="ir-tb-d">No injury — could have</span>
+  </div>
+
+  <!-- 2. The form ------------------------------------------------------- -->
+  <div id="ir-form" hidden>
+
+    <!-- Accident-in-progress: fire an immediate preliminary alert -->
+    <div class="ir-notify ir-acc-only" id="ir-notify" hidden>
+      <div class="ir-notify-txt">Accident in progress? Alert leadership <b>now</b>, before filling the form.</div>
+      <input id="ir-notify-by" class="ir-input ir-input-initials" list="ir-roster" maxlength="8" placeholder="Your initials" />
+      <button type="button" class="ir-btn danger" id="ir-notify-btn" disabled>⚠ Notify leadership now</button>
+    </div>
+
+    <!-- Confirm the preliminary send -->
+    <div class="ir-confirm ir-acc-only" id="ir-confirm" hidden>
+      <div class="ir-confirm-txt">Send an immediate <b>preliminary alert</b> to leadership now? This texts everyone that an accident occurred, before the form is filled in.</div>
+      <div class="ir-confirm-row">
+        <button type="button" class="ir-btn sm" id="ir-confirm-cancel">Not yet</button>
+        <button type="button" class="ir-btn sm danger" id="ir-confirm-send">⚠ Send preliminary alert</button>
+      </div>
+    </div>
+
+    <!-- Preliminary sent -->
+    <div class="ir-prelim-sent" id="ir-prelim-sent" hidden>✓ Preliminary alert sent to leadership. Complete the form and submit the full details.</div>
+
+    <!-- Fields -->
+    <div class="ir-grid">
+      <label class="ir-field">
+        <span class="ir-label">Location *</span>
+        <select id="ir-loc" class="ir-input">
+          {% for l in locations %}<option>{{ l }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="ir-field">
+        <span class="ir-label">When *</span>
+        <input type="datetime-local" id="ir-when" class="ir-input" />
+      </label>
+      <label class="ir-field">
+        <span class="ir-label">Reported by (initials) *</span>
+        <input id="ir-by" class="ir-input" list="ir-roster" maxlength="8" placeholder="e.g. JP" />
+      </label>
+
+      <label class="ir-field ir-acc-only">
+        <span class="ir-label">Severity</span>
+        <select id="ir-severity" class="ir-input">
+          {% for s in severities %}<option>{{ s }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="ir-field ir-nm-only">
+        <span class="ir-label">Potential severity</span>
+        <select id="ir-potential" class="ir-input">
+          {% for p in potentials %}<option{{ ' selected' if p == 'Medium' }}>{{ p }}</option>{% endfor %}
+        </select>
+      </label>
+
+      <label class="ir-field ir-acc-only">
+        <span class="ir-label">Person involved</span>
+        <input id="ir-person" class="ir-input" placeholder="Name or initials" />
+      </label>
+      <label class="ir-field ir-acc-only">
+        <span class="ir-label">Medical attention</span>
+        <select id="ir-medical" class="ir-input">
+          {% for m in medicals %}<option>{{ m }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="ir-field ir-acc-only ir-col-full">
+        <span class="ir-label">Injury / body part</span>
+        <input id="ir-injury" class="ir-input" placeholder="e.g. laceration, left hand" />
+      </label>
+
+      <label class="ir-field ir-col-full">
+        <span class="ir-label">What happened *</span>
+        <textarea id="ir-what" class="ir-input" rows="3" placeholder="Describe the sequence of events."></textarea>
+      </label>
+      <label class="ir-field ir-col-full">
+        <span class="ir-label">Immediate action taken</span>
+        <textarea id="ir-action" class="ir-input" rows="2" placeholder="What was done right away (area secured, machine locked out, etc.)"></textarea>
+      </label>
+      <label class="ir-field ir-col-full">
+        <span class="ir-label">Equipment / product involved</span>
+        <input id="ir-equip" class="ir-input" placeholder="Optional — e.g. P-1180, hoist #2" />
+      </label>
+    </div>
+
+    <div class="ir-actions">
+      <button type="button" class="ir-btn" id="ir-cancel">Cancel</button>
+      <button type="button" class="ir-btn" id="ir-submit" disabled>➤ Submit &amp; send detailed report</button>
+    </div>
+    <div class="ir-hint" id="ir-error">Reported-by and "what happened" are required to submit.</div>
+  </div>
+
+  <!-- 3. Submitted confirmation ---------------------------------------- -->
+  <div id="ir-done" hidden>
+    <div class="ir-done-head">✓ <span id="ir-done-label">Incident</span> report sent</div>
+    <div class="ir-done-sub">Detailed report sent to leadership and filed to the EHS log.</div>
+    <div id="ir-sent-log"></div>
+    <div class="ir-actions">
+      <button type="button" class="ir-btn" id="ir-new">Report another</button>
+    </div>
+  </div>
+
+  <datalist id="ir-roster">
+    {% for i in roster %}<option value="{{ i }}"></option>{% endfor %}
+  </datalist>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/incident.js') }}"></script>
+{% endblock %}

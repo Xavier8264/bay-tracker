@@ -48,7 +48,39 @@ def _add_action_group_to_events(conn):
     _add_column_if_missing(conn, "events", "action_group", "TEXT")
 
 
-MIGRATIONS: list = [_add_action_group_to_events]
+def _add_incidents(conn):
+    """v4: the EHS accident / near-miss log, plus the two notification_outbox
+    columns its leadership alerts need. (db.create_schema also creates these on
+    startup; running it here keeps the migration history honest.) All additive
+    and idempotent: CREATE TABLE IF NOT EXISTS + ADD COLUMN only-if-missing."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS incidents (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts                TEXT    NOT NULL,
+            type              TEXT    NOT NULL,
+            occurred_at       TEXT,
+            location          TEXT,
+            reported_by       TEXT,
+            severity          TEXT,
+            potential         TEXT,
+            person            TEXT,
+            injury            TEXT,
+            medical           TEXT,
+            what_happened     TEXT,
+            immediate_action  TEXT,
+            equipment         TEXT,
+            prelim_sent_at    TEXT,
+            finalized_at      TEXT,
+            created_at        TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_incidents_ts ON incidents(ts);
+    """)
+    _add_column_if_missing(conn, "notification_outbox", "incident_id", "INTEGER")
+    _add_column_if_missing(conn, "notification_outbox", "kind", "TEXT")
+    conn.commit()
+
+
+MIGRATIONS: list = [_add_action_group_to_events, _add_incidents]
 
 
 def main() -> None:

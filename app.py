@@ -22,7 +22,8 @@ from flask import (Flask, Response, jsonify, redirect, render_template,
 from io import BytesIO
 
 from baytracker import (__version__, actions, auth, bootstrap, config, db,
-                        events, exports, metrics, notify, notify_config, state)
+                        events, exports, incidents, metrics, notify,
+                        notify_config, state)
 from baytracker.app_db import close_db, get_db
 from baytracker.actions import ActionError
 from baytracker.sse import broker
@@ -78,6 +79,28 @@ def create_app() -> Flask:
     @app.route("/console")
     def console():
         return render_template("console.html", version=__version__)
+
+    @app.route("/incident")
+    def incident():
+        # The EHS "Report an incident" page. Public like /console -- the floor
+        # must be able to reach it instantly, no PIN. The location dropdown is
+        # built from the real bay names plus a few non-bay plant areas; the
+        # roster feeds the initials autocomplete.
+        conn = get_db()
+        bays = conn.execute(
+            "SELECT name FROM bays WHERE active = 1 "
+            "ORDER BY is_extra ASC, sort_order ASC;").fetchall()
+        roster = conn.execute(
+            "SELECT initials FROM initials_roster WHERE active = 1 "
+            "ORDER BY initials;").fetchall()
+        return render_template(
+            "incident.html",
+            version=__version__,
+            locations=[b["name"] for b in bays] + incidents.EXTRA_LOCATIONS,
+            roster=[r["initials"] for r in roster],
+            severities=incidents.SEVERITIES,
+            medicals=incidents.MEDICALS,
+            potentials=incidents.POTENTIALS)
 
     @app.route("/stats")
     def stats():
@@ -176,6 +199,51 @@ def create_app() -> Flask:
             except Exception:
                 pass
         return jsonify({"ok": True})
+
+    # ---------------------------------------------------------------
+    # Incident report (EHS). Public, like /api/action. Both endpoints only
+    # write to the local DB + outbox; the background worker sends the alerts,
+    # so a wifi drop the moment an accident is reported never loses the alert.
+    # ---------------------------------------------------------------
+    @app.route("/api/incident/prelim", methods=["POST"])
+    def api_incident_prelim():
+        # The immediate "accident in progress" heads-up: file the incident row
+        # now and queue a preliminary alert to leadership, before the form.
+        conn = get_db()
+        p = request.get_json(force=True, silent=True) or {}
+        try:
+            inc = incidents.start_preliminary(
+                conn, type=p.get("type"),
+                location=p.get("location"), reported_by=p.get("by"))
+            echo = incidents.enqueue_incident(conn, inc, "PRELIMINARY")
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        return jsonify({"ok": True, "incident_id": inc["id"], "sent": echo})
+
+    @app.route("/api/incident/submit", methods=["POST"])
+    def api_incident_submit():
+        # The full report: finalize the row a preliminary alert started (by
+        # incident_id), or insert a fresh complete row when there was no
+        # preliminary, then queue the detailed alert.
+        conn = get_db()
+        p = request.get_json(force=True, silent=True) or {}
+        fields = dict(
+            occurred_at=p.get("when"), location=p.get("loc"),
+            reported_by=p.get("by"), severity=p.get("severity"),
+            potential=p.get("potential"), person=p.get("person"),
+            injury=p.get("injury"), medical=p.get("medical"),
+            what_happened=p.get("what"), immediate_action=p.get("action"),
+            equipment=p.get("equip"))
+        try:
+            inc_id = p.get("incident_id")
+            if inc_id:
+                inc = incidents.finalize(conn, int(inc_id), **fields)
+            else:
+                inc = incidents.record_full(conn, type=p.get("type"), **fields)
+            echo = incidents.enqueue_incident(conn, inc, "DETAILED")
+        except (ValueError, TypeError) as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        return jsonify({"ok": True, "incident_id": inc["id"], "sent": echo})
 
     # ---------------------------------------------------------------
     # Corrections (stats, PIN-gated)

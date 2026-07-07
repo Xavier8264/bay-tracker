@@ -64,3 +64,4 @@ jobs:
         python tests/test_time_engine.py
         python tests/test_undo.py
         python tests/test_notify.py
+        python tests/test_incidents.py
