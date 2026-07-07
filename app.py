@@ -533,6 +533,8 @@ def _register_admin_routes(app):
             "SELECT * FROM bays ORDER BY is_extra, sort_order;").fetchall()]
         recipients = [dict(r) for r in conn.execute(
             "SELECT * FROM recipients ORDER BY active DESC, name;").fetchall()]
+        ehs_recipients = [dict(r) for r in conn.execute(
+            "SELECT * FROM ehs_recipients ORDER BY active DESC, name;").fetchall()]
         return jsonify({
             "divisions": divisions,
             "reasons": reasons,
@@ -540,6 +542,7 @@ def _register_admin_routes(app):
             "initials": roster,
             "bays": bays,
             "recipients": recipients,
+            "ehs_recipients": ehs_recipients,
             "notify": {
                 "email_configured": notify_config.email_configured(),
                 "sms_configured": notify_config.sms_configured(),
@@ -829,6 +832,70 @@ def _register_admin_routes(app):
                 sent.append("email")
             if r["notify_sms"] and r["phone"]:
                 notify.send_sms_twilio(r["phone"], "BayTracker test — config OK.")
+                sent.append("sms")
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+        if not sent:
+            return jsonify({"ok": False,
+                            "error": "No enabled channel with an address to test."}), 400
+        return jsonify({"ok": True, "sent": sent})
+
+    # --- EHS incident recipients (SEPARATE list from delay recipients) ------
+    # Same op-dispatch shape as admin_recipient, but no bay/control scope: an
+    # accident is plant-wide, so every active EHS recipient is alerted.
+    @app.route("/api/admin/ehs_recipient", methods=["POST"])
+    @auth.require_area("admin")
+    def admin_ehs_recipient():
+        conn = get_db()
+        p = _body()
+        op = p.get("op")
+        if op == "add":
+            name = (p.get("name") or "").strip()
+            if not name:
+                return jsonify({"ok": False, "error": "Name required."}), 400
+            conn.execute(
+                "INSERT INTO ehs_recipients (name, email, phone, notify_email, notify_sms, active) "
+                "VALUES (?, ?, ?, ?, ?, 1);",
+                (name, (p.get("email") or "").strip() or None,
+                 _normalize_phone(p.get("phone")),
+                 1 if p.get("notify_email") else 0,
+                 1 if p.get("notify_sms") else 0))
+        elif op == "update":
+            conn.execute(
+                "UPDATE ehs_recipients SET name = ?, email = ?, phone = ?, "
+                "notify_email = ?, notify_sms = ? WHERE id = ?;",
+                ((p.get("name") or "").strip(),
+                 (p.get("email") or "").strip() or None,
+                 _normalize_phone(p.get("phone")),
+                 1 if p.get("notify_email") else 0,
+                 1 if p.get("notify_sms") else 0,
+                 p["id"]))
+        elif op in ("retire", "activate"):
+            conn.execute("UPDATE ehs_recipients SET active = ? WHERE id = ?;",
+                         (1 if op == "activate" else 0, p["id"]))
+        else:
+            return jsonify({"ok": False, "error": "Unknown op."}), 400
+        conn.commit()
+        return jsonify({"ok": True})
+
+    @app.route("/api/admin/ehs_recipient_test", methods=["POST"])
+    @auth.require_area("admin")
+    def admin_ehs_recipient_test():
+        # Send directly through the adapters (bypassing the outbox) so the EHS
+        # list's config can be confirmed before waiting for a real accident.
+        conn = get_db()
+        p = _body()
+        r = conn.execute("SELECT * FROM ehs_recipients WHERE id = ?;", (p.get("id"),)).fetchone()
+        if r is None:
+            return jsonify({"ok": False, "error": "No such recipient."}), 404
+        sent = []
+        try:
+            if r["notify_email"] and r["email"]:
+                notify.send_email_postmark(r["email"], "EHS test",
+                                           "Test EHS incident alert — config OK.")
+                sent.append("email")
+            if r["notify_sms"] and r["phone"]:
+                notify.send_sms_twilio(r["phone"], "EHS test — config OK.")
                 sent.append("sms")
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 502

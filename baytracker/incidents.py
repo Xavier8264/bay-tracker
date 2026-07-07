@@ -201,10 +201,14 @@ def _subject(incident: sqlite3.Row, kind: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _leadership_recipients(conn: sqlite3.Connection):
-    """Active recipients with at least one usable channel. Bay/control scopes are
-    intentionally ignored: an accident is plant-wide."""
+    """Active EHS recipients with at least one usable channel.
+
+    This reads the dedicated `ehs_recipients` list -- SEPARATE from the delay
+    `recipients` list (edited independently in /admin), because the people who
+    need to hear about an injury usually differ from the bay-delay list. An
+    accident is plant-wide, so there is no bay/control scope here."""
     return conn.execute(
-        "SELECT * FROM recipients WHERE active = 1 "
+        "SELECT * FROM ehs_recipients WHERE active = 1 "
         "AND ((notify_email = 1 AND email IS NOT NULL AND email <> '') "
         "  OR (notify_sms = 1 AND phone IS NOT NULL AND phone <> ''));").fetchall()
 

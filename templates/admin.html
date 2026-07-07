@@ -143,6 +143,24 @@
       <tbody id="recipients"></tbody></table>
   </div>
 
+  <!-- EHS incident recipients (SEPARATE list from delay notifications) -->
+  <div class="card"><h2>EHS incident recipients</h2>
+    <p class="hint">A <b>separate</b> list from delay notifications above: these people are alerted when an
+      <b>accident or near miss</b> is reported on the <a href="{{ url_for('incident') }}">Incident</a> page.
+      An accident is plant-wide, so there's no bay/scope — everyone here is alerted. Uses the same email/SMS
+      setup as delay alerts (queued locally, sent + retried by the background worker).</p>
+    <div class="toolbar">
+      <div class="col"><label>Name</label><input id="ehs-name" placeholder="e.g. Sam EHS"></div>
+      <div class="col"><label>Email</label><input id="ehs-email" placeholder="sam@yourco.com"></div>
+      <div class="col"><label>Phone <span class="hint">(E.164)</span></label><input id="ehs-phone" placeholder="+14145551234"></div>
+      <div class="col"><label><input type="checkbox" id="ehs-email-on" style="width:auto"> Email</label></div>
+      <div class="col"><label><input type="checkbox" id="ehs-sms-on" style="width:auto"> SMS</label></div>
+      <button class="primary" id="add-ehs">Add</button>
+    </div>
+    <table><thead><tr><th>Name</th><th>Email</th><th>SMS</th><th>Status</th><th></th></tr></thead>
+      <tbody id="ehs-recipients"></tbody></table>
+  </div>
+
   <!-- PINs -->
   <div class="card"><h2>PINs</h2>
     <p class="hint">Protect Stats (cost/analysis) and Admin (configuration). Leave blank and save to clear a PIN.</p>

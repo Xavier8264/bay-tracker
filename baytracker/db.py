@@ -31,7 +31,9 @@ from . import config
 #                 console Undo can reverse a multi-row action atomically).
 #   v4 (2026-07): added incidents (EHS accident / near-miss log) + notification_outbox
 #                 incident_id/kind columns (leadership alerts reuse the outbox + worker).
-SCHEMA_VERSION = 4
+#   v5 (2026-07): added ehs_recipients -- the EHS incident alert list, kept SEPARATE
+#                 from the delay-notification `recipients` list (different people).
+SCHEMA_VERSION = 5
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +238,26 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at        TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_ts ON incidents(ts);
+
+-- =====================================================================
+-- ehs_recipients : who gets an EHS incident alert (accident / near miss). This
+-- is a SEPARATE list from `recipients` (delay notifications) on purpose -- the
+-- people who need to hear about an injury are usually not the same people who
+-- get bay-delay alerts, so the two are edited independently in /admin. An
+-- accident is plant-wide, so there is no bay/control scope here -- every active
+-- EHS recipient with a usable channel is alerted. Soft-retired (active=0),
+-- never hard-deleted, so the outbox audit trail always resolves.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS ehs_recipients (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    email         TEXT,
+    phone         TEXT,                          -- E.164 only, e.g. +14145551234
+    notify_email  INTEGER NOT NULL DEFAULT 0,    -- 0/1
+    notify_sms    INTEGER NOT NULL DEFAULT 0,    -- 0/1
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
 
 -- =====================================================================
 -- schema_version : single-row table recording the applied schema version so

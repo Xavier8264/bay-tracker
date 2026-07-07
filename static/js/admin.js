@@ -61,7 +61,7 @@
   function renderAll() {
     renderDivisions(); renderReasons(); renderProducts(); renderInitials();
     renderBays(); renderBreaks(); renderShifts(); renderOC(); fillSettings(); fillPins();
-    renderNotifyStatus(); renderRecipients();
+    renderNotifyStatus(); renderRecipients(); renderEhsRecipients();
     // reason division dropdown
     $("nr-div").innerHTML = `<option value="">—</option>` +
       data.divisions.filter(d => d.active).map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
@@ -258,6 +258,47 @@
     else alert((r.data && r.data.error) || "Test failed.");
   }
 
+  // ---- EHS incident recipients (separate list; no bay/control scope) ----
+  function renderEhsRecipients() {
+    $("ehs-recipients").innerHTML = (data.ehs_recipients || []).map(r => {
+      const emailCell = r.notify_email && r.email ? esc(r.email) : '<span class="no-data">—</span>';
+      const smsCell = r.notify_sms && r.phone ? esc(r.phone) : '<span class="no-data">—</span>';
+      const canTest = (r.notify_email && r.email) || (r.notify_sms && r.phone);
+      return `<tr${r.active ? "" : ' style="opacity:.55"'}>
+        <td>${esc(r.name)}</td><td>${emailCell}</td><td>${smsCell}</td>
+        <td>${r.active ? "active" : '<span class="badge">retired</span>'}</td>
+        <td style="text-align:right">
+          <button class="btn" data-edit-ehs='${JSON.stringify(r).replace(/'/g, "&#39;")}'>Edit</button>
+          ${canTest ? `<button class="btn" data-test-ehs="${r.id}">Send test</button>` : ""}
+          <button class="btn" data-toggle-ehs="${r.id}" data-op="${r.active ? "retire" : "activate"}">${r.active ? "Retire" : "Restore"}</button>
+        </td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="no-data">no EHS recipients yet</td></tr>`;
+  }
+  function editEhsRecipient(r) {
+    openModal(`<h2>Edit EHS recipient</h2>
+      <label>Name</label><input id="m-name" value="${esc(r.name)}">
+      <label>Email</label><input id="m-email" value="${esc(r.email || "")}">
+      <label>Phone (E.164, e.g. +14145551234)</label><input id="m-phone" value="${esc(r.phone || "")}">
+      <label style="margin-top:8px"><input type="checkbox" id="m-email-on" ${r.notify_email ? "checked" : ""} style="width:auto"> Send email</label>
+      <label><input type="checkbox" id="m-sms-on" ${r.notify_sms ? "checked" : ""} style="width:auto"> Send SMS</label>
+      <div class="actions"><button id="x">Cancel</button><button class="primary" id="ok">Save</button></div>`);
+    $("x").onclick = closeModal;
+    $("ok").onclick = async () => {
+      await send("/api/admin/ehs_recipient", {
+        op: "update", id: r.id, name: $("m-name").value, email: $("m-email").value,
+        phone: $("m-phone").value, notify_email: $("m-email-on").checked,
+        notify_sms: $("m-sms-on").checked
+      });
+      closeModal();
+    };
+  }
+  async function testEhsRecipient(id) {
+    toast("Sending test…");
+    const r = await BT.post("/api/admin/ehs_recipient_test", { id });
+    if (r.ok) toast("Test sent ✓ (" + ((r.data.sent || []).join(" + ") || "—") + ")");
+    else alert((r.data && r.data.error) || "Test failed.");
+  }
+
   // ===== modal edit =====
   const backdrop = $("backdrop"), modal = $("modal");
   function openModal(html) { modal.innerHTML = html; backdrop.classList.add("show"); }
@@ -314,6 +355,9 @@
   $("add-recipient").onclick = () => send("/api/admin/recipient", { op: "add",
     name: $("nrec-name").value, email: $("nrec-email").value, phone: $("nrec-phone").value,
     notify_email: $("nrec-email-on").checked, notify_sms: $("nrec-sms-on").checked });
+  $("add-ehs").onclick = () => send("/api/admin/ehs_recipient", { op: "add",
+    name: $("ehs-name").value, email: $("ehs-email").value, phone: $("ehs-phone").value,
+    notify_email: $("ehs-email-on").checked, notify_sms: $("ehs-sms-on").checked });
 
   $("save-layout").onclick = (e) => send("/api/admin/layout", {
     grid_cols: parseInt($("lay-cols").value, 10), standard_rows: parseInt($("lay-rows").value, 10),
@@ -448,6 +492,13 @@
       const restoring = b.dataset.op === "activate";
       if (restoring || confirm("Retire this recipient? They stop getting alerts; past send history is kept."))
         send("/api/admin/recipient", { op: b.dataset.op, id: +b.dataset.toggleRec });
+    }
+    else if ((b = e.target.closest("[data-edit-ehs]"))) editEhsRecipient(JSON.parse(b.dataset.editEhs.replace(/&#39;/g, "'")));
+    else if ((b = e.target.closest("[data-test-ehs]"))) testEhsRecipient(+b.dataset.testEhs);
+    else if ((b = e.target.closest("[data-toggle-ehs]"))) {
+      const restoring = b.dataset.op === "activate";
+      if (restoring || confirm("Retire this EHS recipient? They stop getting incident alerts; past send history is kept."))
+        send("/api/admin/ehs_recipient", { op: b.dataset.op, id: +b.dataset.toggleEhs });
     }
   });
 

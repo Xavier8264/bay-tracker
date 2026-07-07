@@ -80,7 +80,26 @@ def _add_incidents(conn):
     conn.commit()
 
 
-MIGRATIONS: list = [_add_action_group_to_events, _add_incidents]
+def _add_ehs_recipients(conn):
+    """v5: the EHS incident alert list, kept separate from the delay-notification
+    `recipients` list. (db.create_schema also creates it on startup; running it
+    here keeps the migration history honest.) Additive + idempotent."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ehs_recipients (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT    NOT NULL,
+            email         TEXT,
+            phone         TEXT,
+            notify_email  INTEGER NOT NULL DEFAULT 0,
+            notify_sms    INTEGER NOT NULL DEFAULT 0,
+            active        INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+    """)
+    conn.commit()
+
+
+MIGRATIONS: list = [_add_action_group_to_events, _add_incidents, _add_ehs_recipients]
 
 
 def main() -> None:

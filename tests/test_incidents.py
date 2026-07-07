@@ -51,14 +51,15 @@ def fresh_conn():
 
 
 def add_recipient(conn, name, **kw):
-    cols = {"email": None, "phone": None, "notify_email": 0, "notify_sms": 0,
-            "bay_scope": "all", "control_scope": "all", "active": 1}
+    # Incident alerts read the SEPARATE ehs_recipients list (not the delay
+    # `recipients` list), so seed that table here.
+    cols = {"email": None, "phone": None, "notify_email": 0, "notify_sms": 0, "active": 1}
     cols.update(kw)
     conn.execute(
-        "INSERT INTO recipients (name,email,phone,notify_email,notify_sms,bay_scope,control_scope,active)"
-        " VALUES (?,?,?,?,?,?,?,?);",
+        "INSERT INTO ehs_recipients (name,email,phone,notify_email,notify_sms,active)"
+        " VALUES (?,?,?,?,?,?);",
         (name, cols["email"], cols["phone"], cols["notify_email"], cols["notify_sms"],
-         cols["bay_scope"], cols["control_scope"], cols["active"]))
+         cols["active"]))
     conn.commit()
 
 
@@ -170,12 +171,33 @@ def test_shared_worker_sends_incident_when_configured():
     conn.close()
 
 
+def test_ehs_list_is_separate_from_delay_recipients():
+    print("== incident alerts use ehs_recipients ONLY, not the delay recipients list ==")
+    conn = fresh_conn()
+    # Someone on the DELAY recipients list but NOT on the EHS list.
+    conn.execute("INSERT INTO recipients (name,email,notify_email,bay_scope,control_scope,active)"
+                 " VALUES ('DelayOnly','delay@co',1,'all','all',1);")
+    conn.commit()
+    inc = incidents.record_full(conn, type="ACCIDENT", reported_by="JP",
+            what_happened="x", location="Bay 1")
+    echo = incidents.enqueue_incident(conn, inc, "DETAILED")
+    check("delay-only recipient is NOT alerted", echo["recipients"], {"email": 0, "sms": 0})
+    check("no outbox rows written", conn.execute(
+        "SELECT COUNT(*) n FROM notification_outbox;").fetchone()["n"], 0)
+    # Add the person to the EHS list -> now they are alerted.
+    add_recipient(conn, "EHS Sam", email="ehs@co", notify_email=1)
+    echo2 = incidents.enqueue_incident(conn, inc, "DETAILED")
+    check("EHS-list recipient IS alerted", echo2["recipients"]["email"], 1)
+    conn.close()
+
+
 def main():
     try:
         test_preliminary_then_finalize_one_row()
         test_record_full_no_preliminary()
         test_validation_requires_initials_and_what()
         test_shared_worker_sends_incident_when_configured()
+        test_ehs_list_is_separate_from_delay_recipients()
     finally:
         _reset_config()
         shutil.rmtree(_TMP, ignore_errors=True)
