@@ -4,17 +4,19 @@
     One click brings the server up the right way for THIS machine, whichever way
     it was installed:
 
-      * Installed as a Windows service (setup.ps1 -InstallService)?
+      * Installed as an AUTO-START Windows service (setup.ps1 -InstallService)?
         Starts the service if it isn't already running, then health-checks it.
         (The service also auto-starts on boot and auto-restarts on crash; this
         button is for the times you stopped it, or want to confirm it's up.)
+        NOTE: starting/stopping a Windows service needs an Administrator
+        PowerShell -- if this window isn't elevated you'll get a clear message.
 
-      * Running in the foreground instead (no service)?
+      * Running in the foreground instead (no service, or a leftover service
+        switched to Manual/Disabled start)?
         Hands off to start.ps1, which launches the server in this window
-        (leave it open; Ctrl+C stops it).
+        (leave it open; Ctrl+C stops it). No admin rights needed.
 
-    Safe to click any time -- if the server is already up it just says so. No
-    admin prompt (starting an already-installed service does not need elevation).
+    Safe to click any time -- if the server is already up it just says so.
 
     Run by hand:  powershell -ExecutionPolicy Bypass -File .\boot.ps1
 #>
@@ -66,7 +68,15 @@ function Test-Health {
 
 Write-Host "=== Start Bay Tracking server ===" -ForegroundColor Cyan
 
+# Only a service set to start AUTOMATICALLY counts as the active deployment
+# (that's how setup.ps1 -InstallService leaves it). A leftover service switched
+# to Manual/Disabled is decommissioned -- starting it would need admin rights
+# and it isn't what serves the app, so fall through to the foreground path.
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($svc -and $svc.StartType -ne 'Automatic') {
+    Write-Host "(Service '$ServiceName' exists but is set to '$($svc.StartType)' start -- treating this PC as a FOREGROUND install.)" -ForegroundColor DarkGray
+    $svc = $null
+}
 if ($svc) {
     # --- Service-managed deployment ----------------------------------------
     $url = Get-LanUrl
@@ -74,9 +84,15 @@ if ($svc) {
         Write-Host "Service '$ServiceName' is already running." -ForegroundColor Green
     } else {
         Write-Host "Starting service '$ServiceName' (current state: $($svc.Status))..."
-        $nssm = Join-Path $RepoDir "tools\nssm.exe"
-        if (Test-Path $nssm) { & $nssm start $ServiceName | Out-Null } else { Start-Service -Name $ServiceName }
-        Write-Host "Start requested." -ForegroundColor Green
+        try {
+            Start-Service -Name $ServiceName
+            Write-Host "Start requested." -ForegroundColor Green
+        } catch {
+            Write-Warning "Could not start the service: $($_.Exception.Message)"
+            Write-Warning "Starting a Windows service needs an Administrator PowerShell. Right-click PowerShell,"
+            Write-Warning "'Run as administrator', then:  Start-Service $ServiceName"
+            exit 1
+        }
     }
 
     Write-Host "Health check..."
@@ -98,7 +114,7 @@ else {
     # --- Foreground deployment: start.ps1 runs the server in THIS window ----
     $startPs1 = Join-Path $RepoDir "start.ps1"
     if (-not (Test-Path $startPs1)) { throw "start.ps1 not found in $RepoDir -- run setup.ps1 first." }
-    Write-Host "No '$ServiceName' service is installed -- launching in the foreground."
+    Write-Host "This PC is not service-managed -- launching in the foreground."
     Write-Host "Leave this window open; Ctrl+C stops the server." -ForegroundColor Yellow
     Write-Host ""
     & $startPs1 -Port $Port

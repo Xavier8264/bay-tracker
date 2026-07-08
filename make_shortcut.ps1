@@ -19,8 +19,12 @@
         -Dashboard   also drop a "Bay Tracker Dashboard" icon that opens the live
                      board in the default browser (handy on the server PC).
 
-    Neither launcher needs admin rights, so clicking them never triggers a UAC
-    prompt. The shortcuts point at THIS repo's scripts, so create them from the
+    The launchers are designed for the FOREGROUND install and need no admin
+    rights there, so clicking them never triggers a UAC prompt. On a PC that
+    runs the auto-start Windows service instead (setup.ps1 -InstallService),
+    starting/restarting the service requires an Administrator PowerShell -- the
+    scripts detect that and say so instead of failing cryptically.
+    The shortcuts point at THIS repo's scripts, so create them from the
     folder you actually run the server from (e.g. C:\BayTracking).
 #>
 param(

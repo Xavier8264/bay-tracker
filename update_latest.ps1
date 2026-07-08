@@ -38,10 +38,14 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "Fetching the latest releases from GitHub..."
-try {
-    git fetch --tags --prune origin 2>&1 | Out-Host
-} catch {
-    Write-Warning "Could not reach GitHub: $($_.Exception.Message)"
+# git prints its fetch summary ("From https://... * [new tag] ...") to STDERR.
+# Under $ErrorActionPreference = 'Stop', PowerShell 5.1 turns REDIRECTED native
+# stderr into a terminating error, so a `2>&1` here made this step "fail" with a
+# bogus "could not reach GitHub" precisely when a new release was downloaded.
+# Leave stderr alone (it still prints to the console) and trust the exit code.
+git fetch --tags --prune origin
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not fetch from GitHub (git exit code $LASTEXITCODE) -- see the message above."
     Write-Warning "Check this PC's internet connection and try again."
     return
 }
@@ -55,9 +59,11 @@ if (-not $latest) {
 }
 $latest = $latest.Trim()
 
-$currentDesc = (git describe --tags --always 2>$null)
-$latestSha   = (git rev-parse "$latest^{commit}" 2>$null)
-$headSha     = (git rev-parse "HEAD^{commit}" 2>$null)
+# The 2>$null redirects run with EAP=Continue scoped to the block: redirected
+# native stderr + EAP=Stop throws in PS 5.1 (same footgun as the fetch above).
+$currentDesc = & { $ErrorActionPreference = 'Continue'; git describe --tags --always 2>$null }
+$latestSha   = & { $ErrorActionPreference = 'Continue'; git rev-parse "$latest^{commit}" 2>$null }
+$headSha     = & { $ErrorActionPreference = 'Continue'; git rev-parse "HEAD^{commit}" 2>$null }
 
 Write-Host ""
 Write-Host "Currently running: $currentDesc"
@@ -95,5 +101,6 @@ switch ($code) {
               Write-Host "  1. Stop the server's console window (Ctrl+C, or close it)." -ForegroundColor Yellow
               Write-Host "  2. Double-click the 'Start Bay Tracker Server' desktop icon." -ForegroundColor Yellow }
     4       { Write-Warning "The new version $latest failed to deploy, so the code was rolled back to the previous version. Restart the server to resume it. The pre-update DB backup is safe in BAYTRACKER_DATA\backups." }
+    5       { Write-Warning "The update stopped BEFORE changing anything (see the message above -- e.g. the backup failed, or the service needs an Administrator PowerShell). Nothing to undo." }
     default { Write-Warning "Update ran into trouble (exit $code). Read the messages above; the pre-update DB backup is safe in BAYTRACKER_DATA\backups." }
 }
