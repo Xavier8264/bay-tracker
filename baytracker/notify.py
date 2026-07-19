@@ -134,27 +134,51 @@ def send_sms_twilio(to: str, body: str) -> None:
 
 # --- the background worker -------------------------------------------------
 
-BACKOFF_SECONDS = [30, 120, 300, 900, 3600]   # waits between successive attempts
+# Waits between successive attempts. The ladder deliberately stretches to a
+# day: a weekend network outage must delay alerts, not permanently fail them
+# (there is no re-send button -- 'failed' is forever). ~28 hours of coverage.
+BACKOFF_SECONDS = [30, 120, 300, 900, 3600, 4 * 3600, 8 * 3600, 12 * 3600]
 MAX_ATTEMPTS = len(BACKOFF_SECONDS)
 
 
 def process_outbox_once(conn: sqlite3.Connection) -> None:
     """Send one batch of due 'pending' rows. Called repeatedly by the worker."""
-    rows = conn.execute("""
+    # Expire never-attempted rows older than 3 days (their channel was never
+    # configured, or the server sat off that long). A delay/EHS alert that old
+    # is noise -- and without this, the day someone finally configures SMS the
+    # worker would flood out YEARS of stale texts oldest-first. 'expired' is an
+    # honest audit state ('failed' would imply send attempts that never
+    # happened). Rows with attempts keep riding their retry ladder to 'failed'.
+    conn.execute(
+        "UPDATE notification_outbox SET status='expired', "
+        "last_error='expired: not sendable within 3 days of being queued' "
+        "WHERE status='pending' AND attempts = 0 "
+        "AND created_at < datetime('now','localtime','-3 days');")
+    conn.commit()
+
+    # Channels with no credentials yet must be excluded IN THE QUERY, not
+    # skipped in the loop. Their rows stay 'pending' by design (they flow the
+    # moment credentials are added), but they are also always "due" -- so with
+    # the old in-loop skip, 20 unconfigured-channel rows at the head of the
+    # id-ordered LIMIT 20 batch starved every later row FOREVER: one recipient
+    # with SMS ticked before Twilio is configured silently killed all email
+    # (including EHS accident alerts) within weeks.
+    ready = []
+    if cfg.email_configured():
+        ready.append("email")
+    if cfg.sms_configured():
+        ready.append("sms")
+    if not ready:
+        return
+    placeholders = ",".join("?" for _ in ready)
+    rows = conn.execute(f"""
         SELECT * FROM notification_outbox
         WHERE status = 'pending' AND next_attempt_at <= datetime('now','localtime')
+          AND channel IN ({placeholders})
         ORDER BY id LIMIT 20
-    """).fetchall()
+    """, ready).fetchall()
 
     for row in rows:
-        # If this channel isn't configured yet, leave the row PENDING rather than
-        # burning its attempts on a guaranteed failure -- it flows the moment the
-        # credentials are added (e.g. SMS lights up when Twilio is set in Phase 2).
-        if row["channel"] == "email" and not cfg.email_configured():
-            continue
-        if row["channel"] == "sms" and not cfg.sms_configured():
-            continue
-
         # Claim the row so a second pass (or a future second worker) can't grab it.
         claimed = conn.execute(
             "UPDATE notification_outbox SET status='sending' WHERE id=? AND status='pending'",
@@ -178,7 +202,9 @@ def process_outbox_once(conn: sqlite3.Connection) -> None:
                     "UPDATE notification_outbox SET status='failed', attempts=?, "
                     "last_error=? WHERE id=?", (attempts, str(e)[:500], row["id"]))
             else:
-                wait = BACKOFF_SECONDS[min(attempts, len(BACKOFF_SECONDS) - 1)]
+                # attempts is 1-based here (this failure was attempt #1), so
+                # index with attempts-1: the first retry uses the 30 s rung.
+                wait = BACKOFF_SECONDS[min(attempts - 1, len(BACKOFF_SECONDS) - 1)]
                 conn.execute(
                     "UPDATE notification_outbox SET status='pending', attempts=?, "
                     "last_error=?, next_attempt_at=datetime('now','localtime', ?) WHERE id=?",
@@ -204,6 +230,22 @@ def start_outbox_worker(interval: int = 20) -> None:
         _worker_started = True
 
     def loop():
+        # Recover rows orphaned mid-send by a crash/restart. This is a single-
+        # process app, so any 'sending' row at worker startup is a claim held
+        # by a process that no longer exists -- without this it would sit
+        # invisible forever (never retried, never shown as failed). Re-pending
+        # risks a rare duplicate send; for delay/EHS alerts, at-least-once
+        # beats never.
+        try:
+            conn = db.connect()
+            try:
+                conn.execute("UPDATE notification_outbox SET status='pending' "
+                             "WHERE status='sending';")
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
         while True:
             try:
                 conn = db.connect()

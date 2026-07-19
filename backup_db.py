@@ -18,10 +18,34 @@ It is invoked:
 import argparse
 import shutil
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from baytracker import config, db
+
+# How many local timestamped backups to keep. Without pruning, daily full
+# copies of a forever-growing database are the one unbounded disk consumer in
+# the system -- and when the drive finally fills, the EVENT LOG stops accepting
+# writes while the dashboards keep looking alive. 60 dailies ~= two months of
+# history, plus the off-machine copy for disasters.
+KEEP_LOCAL = 60
+
+
+def prune_old_backups(backup_dir: Path, keep: int = KEEP_LOCAL) -> None:
+    """Delete all but the newest ``keep`` local backups.
+
+    The timestamped filenames sort chronologically, so name order is age order.
+    A failed delete is only warned about -- pruning must never break the backup
+    that was just written.
+    """
+    files = sorted(backup_dir.glob("baytracker_*.db"))
+    for old in files[:-keep]:
+        try:
+            old.unlink()
+            print(f"[backup] Pruned old backup {old.name}")
+        except OSError as exc:
+            print(f"[backup] WARNING: could not prune {old.name}: {exc}")
 
 
 def make_backup(dest: Path) -> Path:
@@ -54,8 +78,12 @@ def main() -> None:
     local = config.BACKUP_DIR / f"baytracker_{stamp}.db"
     make_backup(local)
     print(f"[backup] Wrote {local}")
+    prune_old_backups(config.BACKUP_DIR)
 
     # An explicit --dest, or the network path configured in /admin, gets a copy too.
+    # Exit code contract (backup.ps1 and update.ps1 read this): 0 = fully OK,
+    # 2 = local backup OK but the off-machine copy failed. A silent exit 0 here
+    # once hid a network share that had been failing for months.
     extra = args.dest or db_setting_network_path()
     if extra:
         extra_path = Path(extra)
@@ -64,8 +92,13 @@ def main() -> None:
             target = extra_path / local.name
             shutil.copy2(local, target)
             print(f"[backup] Copied to {target}")
+            # Same retention off-machine: one full-size copy per day of a
+            # growing DB would eventually fill the share, and a full share
+            # ends the disaster-recovery copies silently.
+            prune_old_backups(extra_path)
         except OSError as exc:
             print(f"[backup] WARNING: could not copy to {extra}: {exc}")
+            sys.exit(2)
 
 
 def db_setting_network_path():

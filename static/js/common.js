@@ -20,12 +20,15 @@ const BT = (function () {
   const POLL_MS = 8000;          // if SSE goes quiet this long, actively poll
 
   let lastMessageAt = Date.now();
+  let lastSseAt = Date.now();      // updated ONLY by real SSE events, never by polls
+  let lastSseReopenAt = 0;
   let lastSnapshot = null;
   let snapshotAt = Date.now();
   let onStateCb = null;
   let onDelayCb = null;
   let es = null;
-  let polling = false;
+  let pollStartedAt = 0;
+  let reloadScheduled = false;
 
   // ---- formatting ----
   function fmtElapsed(sec) {
@@ -73,6 +76,16 @@ const BT = (function () {
     if (type === "state") {
       lastSnapshot = data;
       snapshotAt = Date.now();
+      // A kiosk never reloads on its own, so without this it would run
+      // pre-update JS against a post-update server FOREVER. When the server's
+      // version changes, reload once after a random delay (staggered so every
+      // TV doesn't hammer a freshly-restarted server at the same instant).
+      if (data && data.version && window.BT_VERSION
+          && data.version !== window.BT_VERSION && !reloadScheduled) {
+        reloadScheduled = true;
+        setTimeout(function () { location.reload(); },
+                   5000 + Math.floor(Math.random() * 55000));
+      }
       if (onStateCb) onStateCb(data);
     } else if (type === "delay") {
       if (onDelayCb) onDelayCb(data);
@@ -82,8 +95,8 @@ const BT = (function () {
   function openSSE() {
     try {
       es = new EventSource("/events");
-      es.addEventListener("state", (e) => handleMessage("state", JSON.parse(e.data)));
-      es.addEventListener("delay", (e) => handleMessage("delay", JSON.parse(e.data)));
+      es.addEventListener("state", (e) => { lastSseAt = Date.now(); handleMessage("state", JSON.parse(e.data)); });
+      es.addEventListener("delay", (e) => { lastSseAt = Date.now(); handleMessage("delay", JSON.parse(e.data)); });
       es.onerror = function () {
         // EventSource auto-reconnects; if it fully closed, reopen shortly.
         if (es && es.readyState === EventSource.CLOSED) {
@@ -96,12 +109,16 @@ const BT = (function () {
   }
 
   async function pollOnce() {
-    if (polling) return;
-    polling = true;
+    // Timestamp guard, not a boolean: a fetch wedged on a half-dead connection
+    // (a hard PC loss can hang it for many minutes) must only suppress polling
+    // briefly, or one stuck request keeps the board stale long after the
+    // server is back.
+    if (Date.now() - pollStartedAt < 15000) return;
+    pollStartedAt = Date.now();
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
       if (r.ok) handleMessage("state", await r.json());
-    } catch (e) { /* still offline */ } finally { polling = false; }
+    } catch (e) { /* still offline */ } finally { pollStartedAt = 0; }
   }
 
   function watchdog() {
@@ -115,8 +132,26 @@ const BT = (function () {
         banner.classList.remove("show");
       }
     }
+    // Keep the topbar pill honest (it ships as "LIVE" in the HTML).
+    const pill = document.getElementById("conn-pill");
+    if (pill) {
+      const stale = age > OFFLINE_MS;
+      pill.textContent = stale ? "OFFLINE" : "LIVE";
+      pill.classList.toggle("bad", stale);
+    }
     // If SSE has gone quiet, actively poll to self-correct.
     if (age > POLL_MS) pollOnce();
+    // Half-open SSE: a dead TCP connection can sit at readyState OPEN forever
+    // (no error event ever fires), leaving polls carrying "state" while the
+    // "delay" takeover channel is silently dead. If no REAL SSE message has
+    // arrived for 30 s (the server heartbeats every 5 s), force a reconnect —
+    // rate-limited so a genuinely down server isn't hammered.
+    const now = Date.now();
+    if (now - lastSseAt > 30000 && now - lastSseReopenAt > 30000) {
+      lastSseReopenAt = now;
+      try { if (es) es.close(); } catch (e) { /* already dead */ }
+      openSSE();
+    }
   }
 
   // ---- public API ----
@@ -133,19 +168,32 @@ const BT = (function () {
     setInterval(() => { if (lastSnapshot) renderFn(lastSnapshot); }, 1000);
   }
 
+  // Both helpers NEVER reject: a network-level fetch failure (server mid-
+  // restart, wifi blip) becomes { ok: false } like any HTTP error. Callers all
+  // check r.ok already; an unhandled rejection here used to kill a page's
+  // whole boot chain (no SSE, no polling, no offline banner — a permanently
+  // dead kiosk) and leave console modals stuck on a dead button.
   async function post(url, body) {
-    const r = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    let data = {};
-    try { data = await r.json(); } catch (e) {}
-    return { ok: r.ok && data.ok !== false, status: r.status, data };
+    try {
+      const r = await fetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      let data = {};
+      try { data = await r.json(); } catch (e) {}
+      return { ok: r.ok && data.ok !== false, status: r.status, data };
+    } catch (e) {
+      return { ok: false, status: 0, data: { error: "Can't reach the server — try again." } };
+    }
   }
   async function get(url) {
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return { ok: false, status: r.status, data: null };
-    return { ok: true, status: r.status, data: await r.json() };
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) return { ok: false, status: r.status, data: null };
+      return { ok: true, status: r.status, data: await r.json() };
+    } catch (e) {
+      return { ok: false, status: 0, data: null };
+    }
   }
 
   function escapeHtml(s) {

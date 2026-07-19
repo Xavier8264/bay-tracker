@@ -58,8 +58,9 @@ $ws       = New-Object -ComObject WScript.Shell
 $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
 function New-Launcher {
-    param([string]$Name, [string]$Script, [string]$Icon, [string]$Description)
-    $lnkPath = Join-Path $desktop "$Name.lnk"
+    param([string]$Name, [string]$Script, [string]$Icon, [string]$Description,
+          [string]$Folder = $desktop)
+    $lnkPath = Join-Path $Folder "$Name.lnk"
     $scriptPath = Join-Path $RepoDir $Script
     $lnk = $ws.CreateShortcut($lnkPath)
     $lnk.TargetPath = $powershell
@@ -80,6 +81,17 @@ New-Launcher -Name "Start Bay Tracker Server" -Script "boot.ps1" -Icon $startIco
 # --- 2. Update from GitHub ---------------------------------------------------
 New-Launcher -Name "Update Bay Tracker" -Script "update_latest.ps1" -Icon $updateIco `
     -Description "Pull the latest release from GitHub and deploy it safely (backup + auto-rollback)."
+
+# --- 3. Auto-start at every login (Startup folder) ---------------------------
+# On a FOREGROUND install nothing else brings the server back after a reboot
+# (Windows Update reboots monthly) -- without this, "someone remembers to
+# double-click the icon" is a load-bearing part of the design. boot.ps1 is safe
+# to run when the server is already up (it health-checks first and just reports
+# healthy), so this same launcher works on every login in every install mode.
+# Needs no admin rights: the per-user Startup folder is always writable.
+$startupDir = [Environment]::GetFolderPath("Startup")
+New-Launcher -Name "Start Bay Tracker Server" -Script "boot.ps1" -Icon $startIco `
+    -Description "Auto-start the Bay Tracking server at login." -Folder $startupDir
 
 # --- Clean up the old single-purpose launcher from earlier versions ----------
 # Earlier installs created one launcher named either "Bay Tracker Server" or
@@ -107,3 +119,5 @@ Write-Host ""
 Write-Host "Desktop icons ready:" -ForegroundColor Cyan
 Write-Host "    Start Bay Tracker Server   -- click to bring the server up"
 Write-Host "    Update Bay Tracker         -- click to pull the latest release from GitHub"
+Write-Host "Also added 'Start Bay Tracker Server' to the Startup folder, so the server"
+Write-Host "comes back automatically at every login (delete that .lnk to opt out)."

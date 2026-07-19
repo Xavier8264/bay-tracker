@@ -75,6 +75,18 @@ if ($latestSha -and $headSha -and ($latestSha -eq $headSha)) {
     return
 }
 
+# If HEAD is AHEAD of the newest release tag (someone ran/committed newer code
+# on this PC, or a release wasn't tagged), "updating" would silently DOWNGRADE
+# and re-break whatever the newer commits fixed. Never do that on a one-click
+# path -- even with -Yes.
+& { $ErrorActionPreference = 'Continue'; git merge-base --is-ancestor "$latest^{commit}" HEAD 2>$null }
+if ($LASTEXITCODE -eq 0) {
+    Write-Warning "This PC is running code NEWER than the latest release tag ($latest) -- an 'update' would be a DOWNGRADE."
+    Write-Warning "Nothing was changed. Tag and push a new release from the dev machine, then click Update again."
+    Write-Warning "(To intentionally roll back, run:  powershell -ExecutionPolicy Bypass -File .\update.ps1 -Tag $latest )"
+    return
+}
+
 if (-not $Yes) {
     Write-Host ""
     $ans = Read-Host "Update to $latest now? The DB is backed up first and rolled back automatically if the new version is unhealthy. [y/N]"

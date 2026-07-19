@@ -200,8 +200,11 @@ def create_app() -> Flask:
             # hiccup can never fail the action that already logged the delay.
             try:
                 notify.enqueue_notifications(conn, row)
-            except Exception:
-                pass
+            except Exception as e:
+                # Still swallowed (the delay IS logged), but leave a trace: a
+                # persistent enqueue failure would otherwise mean alerts
+                # silently never enter the outbox, with nothing to audit.
+                print(f"[baytracker] delay-alert enqueue failed: {e}", flush=True)
         return jsonify({"ok": True})
 
     # ---------------------------------------------------------------
@@ -720,7 +723,7 @@ def _register_admin_routes(app):
         elif op in ("retire", "activate"):
             if op == "retire":
                 # Don't hide a bay that is currently occupied.
-                r = state.replay(conn)
+                r = state.cached_replay(conn)
                 if p["id"] in r.bay_current:
                     return jsonify({"ok": False, "error": "That bay is in use right now."}), 400
             conn.execute("UPDATE bays SET active = ? WHERE id = ?;",
@@ -831,11 +834,11 @@ def _register_admin_routes(app):
         sent = []
         try:
             if r["notify_email"] and r["email"]:
-                notify.send_email_postmark(r["email"], "BayTracker test",
+                notify.send_email_postmark(r["email"], "BayTracker test",  # invariant-ok: admin config test
                                            "Test alert — config OK.")
                 sent.append("email")
             if r["notify_sms"] and r["phone"]:
-                notify.send_sms_twilio(r["phone"], "BayTracker test — config OK.")
+                notify.send_sms_twilio(r["phone"], "BayTracker test — config OK.")  # invariant-ok: admin config test
                 sent.append("sms")
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 502
@@ -895,11 +898,11 @@ def _register_admin_routes(app):
         sent = []
         try:
             if r["notify_email"] and r["email"]:
-                notify.send_email_postmark(r["email"], "EHS test",
+                notify.send_email_postmark(r["email"], "EHS test",  # invariant-ok: admin config test
                                            "Test EHS incident alert — config OK.")
                 sent.append("email")
             if r["notify_sms"] and r["phone"]:
-                notify.send_sms_twilio(r["phone"], "EHS test — config OK.")
+                notify.send_sms_twilio(r["phone"], "EHS test — config OK.")  # invariant-ok: admin config test
                 sent.append("sms")
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 502

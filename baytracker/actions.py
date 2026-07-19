@@ -67,7 +67,7 @@ def start(conn, bay_id, work_order, product_number, initials, component_label=No
     pn = _require(product_number, "Product Number")
     who = _require(initials, "Initials")
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     if bay_id in r.bay_current:
         raise ActionError("That bay is already running. Complete or move it first.")
 
@@ -91,7 +91,7 @@ def move(conn, bay_id, target_bay_id, initials):
     if bay_id == target_bay_id:
         raise ActionError("Choose a different target bay.")
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     src = r.bay_current.get(bay_id)
     if src is None:
         raise ActionError("That bay has nothing running to move.")
@@ -109,7 +109,7 @@ def complete_bay(conn, bay_id, initials):
     until a later move/merge/unit-complete; the bay is not freed here."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None:
         raise ActionError("That bay has nothing running to complete.")
@@ -135,7 +135,7 @@ def mate(conn, keep_bay_id, release_bay_id, initials):
     if keep_bay_id == release_bay_id:
         raise ActionError("Merge needs two different bays.")
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     keep = r.bay_current.get(keep_bay_id)
     rel = r.bay_current.get(release_bay_id)
     if keep is None or rel is None:
@@ -163,7 +163,7 @@ def flag_delay(conn, bay_id, reason_id, note, initials):
     if reason is None:
         raise ActionError("Pick a delay reason.")
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None:
         raise ActionError("That bay isn't running, so it can't be delayed.")
@@ -192,7 +192,7 @@ def clear_delay(conn, bay_id, initials):
     """Stop the delay, resume active."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None or run.current_delay is None:
         raise ActionError("That bay isn't currently delayed.")
@@ -215,7 +215,7 @@ def pause_bay(conn, bay_id, initials):
     """Park an occupied bay (freeze its clocks; suppress alerts)."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None:
         raise ActionError("That bay is empty — there's nothing to pause.")
@@ -232,7 +232,7 @@ def resume_bay(conn, bay_id, initials):
     """Un-park a paused bay: it returns to normal idle/running/delayed."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None or run.current_pause is None:
         raise ActionError("That bay isn't paused.")
@@ -258,7 +258,7 @@ def shift_changeover(conn, pause_ids, resume_ids, initials):
     # the entire changeover (every parked/re-staffed bay) as a single action.
     group = uuid.uuid4().hex
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     changed = 0
     for bid in pause_ids:
         run = r.bay_current.get(bid)
@@ -298,7 +298,7 @@ def undo_last(conn, initials, expect_event_id=None, now=None):
     who = _require(initials, "Initials")
     now = now or datetime.now()
 
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     members = r.undo_members
     if not members:
         raise ActionError("There's nothing to undo.")
@@ -330,7 +330,7 @@ def undo_last(conn, initials, expect_event_id=None, now=None):
 def _terminal(conn, etype, work_order, initials):
     who = _require(initials, "Initials")
     wo = _require(work_order, "Work Order")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     unit = r.units.get(wo)
     if unit is None:
         raise ActionError(f"No work order {wo} is active.")
@@ -392,7 +392,7 @@ def close_open_delay(conn, bay_id, ended_at, initials, note=None):
     """Fix a forgotten clear: close a still-open delay at the time it really ended."""
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None or run.current_delay is None:
         raise ActionError("That bay has no open delay to close.")
@@ -418,7 +418,7 @@ def close_open_run(conn, bay_id, ended_at, initials, terminal=False, note=None):
     """
     _bay(conn, bay_id)
     who = _require(initials, "Initials")
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     run = r.bay_current.get(bay_id)
     if run is None:
         raise ActionError("That bay has no open run to close.")

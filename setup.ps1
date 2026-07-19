@@ -31,7 +31,7 @@
 param(
     [string]$DataDir = "C:\BayTrackerData",   # where the database + backups live (OFF OneDrive!)
     [int]$Port = 5000,                          # the single port to serve on
-    [int]$Threads = 32,                         # waitress threads (>= number of TVs + console + headroom)
+    [int]$Threads = 64,                         # waitress threads: every open dashboard/console holds one for its SSE stream -- keep >> number of screens
     [string]$ServiceName = "BayTracker",
     [switch]$Offline,                            # install deps from the vendored .\wheelhouse (no internet)
     [switch]$OpenFirewall,                       # add the inbound firewall rule (needs admin)
@@ -113,7 +113,10 @@ if ($Offline) {
 # Prove the critical modules are importable. A partial/empty install (e.g. pip
 # aborting on one unsatisfiable pin) must NOT be allowed to reach the "Setup
 # complete" / shortcut-creation steps and masquerade as a working install.
-& $venvPy -c "import waitress, flask, openpyxl" 2>$null
+# Scoped EAP=Continue: redirected native stderr + EAP=Stop throws in PS 5.1
+# precisely when the import FAILS -- which would hide the actionable message on
+# the next line behind a baffling NativeCommandError (known repo footgun).
+& { $ErrorActionPreference = 'Continue'; & $venvPy -c "import waitress, flask, openpyxl" 2>$null }
 if ($LASTEXITCODE -ne 0) { throw "Dependencies did not install correctly (cannot import waitress/flask/openpyxl). Setup aborted -- fix the pip errors above and re-run." }
 
 # --- 3. Set BAYTRACKER_DATA (machine scope if admin, else user) -------------
@@ -137,9 +140,17 @@ if ($LASTEXITCODE -ne 0) { throw "Database initialization FAILED (init_db.py exi
 if ($OpenFirewall) {
     Write-Host "Opening firewall TCP $Port..."
     $rule = "BayTracker ($Port)"
-    netsh advfirewall firewall delete rule name="$rule" | Out-Null
+    netsh advfirewall firewall delete rule name="$rule" | Out-Null   # absent rule is fine
     netsh advfirewall firewall add rule name="$rule" dir=in action=allow protocol=TCP localport=$Port | Out-Null
-    Write-Host "Firewall rule '$rule' added." -ForegroundColor Green
+    # netsh silently needs elevation; without this check a non-admin run would
+    # print a green success while every kiosk gets connection-refused.
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could NOT add the firewall rule (netsh exit $LASTEXITCODE -- this usually needs an Administrator PowerShell)."
+        Write-Warning "TVs/kiosks will NOT reach the server until the rule exists. From an elevated PowerShell run:"
+        Write-Warning "  netsh advfirewall firewall add rule name=`"$rule`" dir=in action=allow protocol=TCP localport=$Port"
+    } else {
+        Write-Host "Firewall rule '$rule' added." -ForegroundColor Green
+    }
 }
 
 # --- 6. Service via NSSM (optional) -----------------------------------------

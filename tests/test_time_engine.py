@@ -74,7 +74,7 @@ def bay(conn, n):
 def unit_durs(conn, wo):
     r = state.replay(conn)
     sched = Schedule.from_settings(conn)
-    return state.unit_durations(sched, r.units[wo], r.runs, datetime.now())
+    return state.unit_durations(sched, r.units[wo], r.runs_by_wo, datetime.now())
 
 
 def test_schedule_breaks_and_offhours():

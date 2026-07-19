@@ -32,7 +32,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from . import db, events
+from . import __version__, db, events
 from .schedule import Schedule, Interval
 
 # Event types the console Undo can reverse: the floor actions an operator logs.
@@ -200,6 +200,11 @@ class ReplayResult:
         self.delays: List[DelayEpisode] = []
         self.units: Dict[str, UnitJourney] = {}
         self.bay_current: Dict[int, BayRun] = {}   # bay_id -> open run
+        # work_order -> that unit's runs, built once at the end of replay().
+        # Every per-unit duration helper looks runs up here: scanning ALL runs
+        # per unit made the stats page and exports quadratic in history
+        # (measured 76 s per stats request at ~1 year of events).
+        self.runs_by_wo: Dict[str, List[BayRun]] = {}
         self.last_event_id: int = 0
         # event ids reversed by a VOID/undo (skipped during this replay).
         self.voided_event_ids: set = set()
@@ -559,6 +564,12 @@ def replay(conn) -> ReplayResult:
                     u.completed = when
                     u.outcome = "complete"
 
+    # Build the work_order -> runs index ONCE, after the fold, so it reflects
+    # final work orders (merges keep each run's own work_order, so this is
+    # stable). O(runs) here replaces an O(runs) scan per unit everywhere else.
+    for run in result.runs:
+        result.runs_by_wo.setdefault(run.work_order, []).append(run)
+
     return result
 
 
@@ -566,7 +577,8 @@ def replay(conn) -> ReplayResult:
 # Per-unit duration breakdown (active/delay/queue/cycle). Used by exports + stats.
 # ---------------------------------------------------------------------------
 
-def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
+def unit_durations(sched: Schedule, unit: UnitJourney,
+                   runs_by_wo: Dict[str, List[BayRun]],
                    now: datetime) -> Dict[str, Optional[float]]:
     """Return active/delay/queue/cycle SECONDS for a unit (None when still open).
 
@@ -583,7 +595,7 @@ def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     if unit.is_open:
         return {"active": None, "delay": None, "queue": None, "cycle": None}
     end = unit.completed or now
-    unit_runs = [r for r in runs if r.work_order == unit.work_order]
+    unit_runs = runs_by_wo.get(unit.work_order, [])
 
     running_all: List[Interval] = []
     delayed_all: List[Interval] = []
@@ -603,7 +615,8 @@ def unit_durations(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     return {"active": active, "delay": delay, "queue": queue, "cycle": cycle}
 
 
-def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
+def unit_live_times(sched: Schedule, unit: UnitJourney,
+                    runs_by_wo: Dict[str, List[BayRun]],
                     now: datetime) -> Tuple[float, float]:
     """Return (elapsed, total) counted SECONDS for a unit, live.
 
@@ -625,7 +638,7 @@ def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
     end = unit.completed or now
     # The survivor's own work order plus any work orders merged into it.
     work_orders = {unit.work_order, *unit.absorbed_work_orders}
-    unit_runs = [r for r in runs if r.work_order in work_orders]
+    unit_runs = [run for w in work_orders for run in runs_by_wo.get(w, [])]
     total = 0.0
     earliest = unit.first_started
     for r in unit_runs:
@@ -647,30 +660,54 @@ def unit_live_times(sched: Schedule, unit: UnitJourney, runs: List[BayRun],
 # (which depends on "now") is recomputed cheaply on top of the cached structure.
 # ---------------------------------------------------------------------------
 _cache_lock = threading.Lock()
-_cache: Dict[str, object] = {"last_id": None, "result": None}
+_rebuild_lock = threading.Lock()   # serializes cache-miss rebuilds (single-flight)
+_cache: Dict[str, object] = {"key": None, "result": None}
 
 
-def _max_event_id(conn) -> int:
+def _cache_key(conn) -> tuple:
+    """(database file, MAX(event id)) -- what the cached result was built from.
+
+    The database FILE must be part of the key: the test scripts open several
+    fresh throwaway databases in one process, and fresh event logs reuse the
+    same small MAX(id) values -- id alone would serve one database's state for
+    another. (In production there is exactly one database per process, so the
+    file component simply never changes.)
+    """
+    db_file = conn.execute("PRAGMA database_list;").fetchone()["file"]
     row = conn.execute("SELECT COALESCE(MAX(id), 0) AS m FROM events;").fetchone()
-    return row["m"]
+    return (db_file, row["m"])
 
 
 def cached_replay(conn) -> ReplayResult:
-    """replay(), but reuse the previous result if no new events were appended."""
-    current_max = _max_event_id(conn)
+    """replay(), but reuse the previous result if no new events were appended.
+
+    The key is re-checked on every call, so callers always see a state that
+    includes every appended event -- action validation uses this too (a full
+    replay per button press grows linearly with years of history). The
+    returned object is SHARED across threads: treat it as read-only.
+    """
+    key = _cache_key(conn)
     with _cache_lock:
-        if _cache["last_id"] == current_max and _cache["result"] is not None:
+        if _cache["key"] == key and _cache["result"] is not None:
             return _cache["result"]  # nothing changed structurally
-    result = replay(conn)
-    with _cache_lock:
-        _cache["last_id"] = current_max
-        _cache["result"] = result
+    # Single-flight rebuild: without this, every thread that misses at the same
+    # moment (heartbeat + a burst of kiosk reconnects after a network blip)
+    # would each run its own full replay -- seconds of CPU apiece once the log
+    # is years long. Waiters re-check the cache after the first rebuild lands.
+    with _rebuild_lock:
+        with _cache_lock:
+            if _cache["key"] == key and _cache["result"] is not None:
+                return _cache["result"]
+        result = replay(conn)
+        with _cache_lock:
+            _cache["key"] = key
+            _cache["result"] = result
     return result
 
 
 def invalidate_cache() -> None:
     with _cache_lock:
-        _cache["last_id"] = None
+        _cache["key"] = None
         _cache["result"] = None
 
 
@@ -733,7 +770,7 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
             u = result.units.get(run.work_order)
             tile["occupies_two"] = bool(u and len(u.occupied_bays) >= 2)
             if u is not None:
-                elapsed_u, total_u = unit_live_times(sched, u, result.runs, now)
+                elapsed_u, total_u = unit_live_times(sched, u, result.runs_by_wo, now)
                 tile["unit_elapsed_seconds"] = int(elapsed_u)
                 tile["unit_total_seconds"] = int(total_u)
 
@@ -806,6 +843,10 @@ def live_snapshot(conn, now: Optional[datetime] = None) -> dict:
 
     return {
         "server_time": _fmt(now),
+        # The running server's version. Kiosks compare it against the version
+        # their page was rendered with (window.BT_VERSION) and reload when an
+        # update lands -- they never reload on their own otherwise.
+        "version": __version__,
         # True only in a database created by make_demo_data.py. The UI shows a
         # "DEMO DATA" badge so example data can never pass for the real log.
         "demo_mode": bool(db.get_setting(conn, "demo_mode", False)),

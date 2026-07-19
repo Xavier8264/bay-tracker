@@ -21,7 +21,10 @@
       "PowerShell(Get-Content venv\\\\pyvenv.cfg; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_time_engine.py > $null; \"time_engine EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_undo.py > $null; \"undo EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_notify.py > $null; \"notify EXIT: $LASTEXITCODE\")",
       "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_time_engine.py > $null; \"time_engine EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_undo.py > $null; \"undo EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe tests\\\\test_notify.py > $null; \"notify EXIT: $LASTEXITCODE\"; & .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests -q)",
       "PowerShell(& .\\\\venv\\\\Scripts\\\\python.exe -m pytest tests\\\\test_zz_conftest_probe.py -q; \"probe pytest EXIT: $LASTEXITCODE\"; Remove-Item tests\\\\test_zz_conftest_probe.py -Confirm:$false; & .\\\\venv\\\\Scripts\\\\python.exe -m pip install flake8 --quiet --disable-pip-version-check; & .\\\\venv\\\\Scripts\\\\python.exe -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv,wheelhouse; \"flake8 EXIT: $LASTEXITCODE\")",
-      "PowerShell(git add .github/workflows/python-package.yml tests/test_time_engine.py tests/test_notify.py tests/conftest.py)"
+      "PowerShell(git add .github/workflows/python-package.yml tests/test_time_engine.py tests/test_notify.py tests/conftest.py)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-ChildItem *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\jprun\\.claude\\projects\\c--Users-jprun-OneDrive-Documents-Bay-Tracking-Display\\memory"

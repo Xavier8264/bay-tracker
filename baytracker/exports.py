@@ -71,7 +71,7 @@ def _bay_lookups(conn):
 def derive_rows(conn, now: Optional[datetime] = None) -> Dict[str, List[dict]]:
     now = now or datetime.now()
     sched = Schedule.from_settings(conn)
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     bay_name, bay_number = _bay_lookups(conn)
     labor_rate = db.get_setting(conn, "labor_rate", None)
 
@@ -141,7 +141,7 @@ def derive_rows(conn, now: Optional[datetime] = None) -> Dict[str, List[dict]]:
     # ---- Unit Journeys ----
     unit_journeys = []
     for wo, u in r.units.items():
-        dur = state.unit_durations(sched, u, r.runs, now)
+        dur = state.unit_durations(sched, u, r.runs_by_wo, now)
         path = " → ".join(str(bay_number.get(b, b)) for b in u.bays_visited)
         unit_journeys.append({
             "_dt": u.first_started,
@@ -369,40 +369,57 @@ def to_xlsx(conn, filters: dict, now: Optional[datetime] = None) -> bytes:
     work_order and product_number cells are forced to text so Excel does not
     strip leading zeros or switch to scientific notation -- this is why XLSX is
     the safer human-readable artifact.
+
+    Uses openpyxl's write-only mode: rows stream to the file as they are
+    appended instead of every cell living in memory at once. The normal mode
+    peaked at ~450 MB for a mid-size log -- an "export everything" a few years
+    in could OOM this process, and on the floor PC this same process serves
+    every TV.
     """
     from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
     from openpyxl.styles import Font
 
     tables = build_filtered(conn, filters, now)
-    wb = Workbook()
-    wb.remove(wb.active)  # drop the default empty sheet
+    wb = Workbook(write_only=True)
+    bold = Font(bold=True)
+
+    def header_cells(ws, labels):
+        out = []
+        for label in labels:
+            cell = WriteOnlyCell(ws, value=label)
+            cell.font = bold
+            out.append(cell)
+        return out
 
     for table, rows in tables.items():
         ws = wb.create_sheet(title=SHEET_TITLES.get(table, table))
-        cols = COLUMNS[table]
-        ws.append(cols)
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-        for r in rows:
-            ws.append([_xlsx_value(c, r.get(c)) for c in cols])
-        # Force identifier columns to text format.
-        for idx, col in enumerate(cols, start=1):
-            if col in TEXT_COLUMNS:
-                for row_cells in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
-                    for cell in row_cells:
-                        cell.number_format = "@"  # Excel text format
         ws.freeze_panes = "A2"
+        cols = COLUMNS[table]
+        # Identifier columns get Excel text format cell-by-cell (write-only
+        # sheets have no iter_rows to restyle after the fact).
+        text_cols = {c for c in cols if c in TEXT_COLUMNS}
+        ws.append(header_cells(ws, cols))
+        for r in rows:
+            out = []
+            for c in cols:
+                value = _xlsx_value(c, r.get(c))
+                if c in text_cols:
+                    cell = WriteOnlyCell(ws, value=value)
+                    cell.number_format = "@"  # Excel text format
+                    out.append(cell)
+                else:
+                    out.append(value)
+            ws.append(out)
 
     # Data Dictionary tab
     ws = wb.create_sheet(title="Data Dictionary")
-    ws.append(["Table", "Column", "Definition"])
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    for table, col, desc in DATA_DICTIONARY:
-        ws.append([table, col, desc])
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["B"].width = 34
     ws.column_dimensions["C"].width = 90
+    ws.append(header_cells(ws, ["Table", "Column", "Definition"]))
+    for table, col, desc in DATA_DICTIONARY:
+        ws.append([table, col, desc])
 
     buf = io.BytesIO()
     wb.save(buf)

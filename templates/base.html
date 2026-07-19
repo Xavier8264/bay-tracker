@@ -41,6 +41,11 @@
 
   {% block content %}{% endblock %}
 
+  {# The page's build version. common.js compares it against the version in
+     every state snapshot and schedules a reload when they differ -- otherwise
+     a kiosk that never reloads would run pre-update JS against a post-update
+     server forever. #}
+  <script>window.BT_VERSION = {{ (version or '')|tojson }};</script>
   <script src="{{ url_for('static', filename='js/common.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

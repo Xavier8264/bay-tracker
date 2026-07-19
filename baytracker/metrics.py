@@ -25,8 +25,10 @@ def _effective_range(conn, filters: dict, now: datetime):
     start_dt = exports._parse_filter_dt(start, end_of_day=False) if start else None
     end_dt = exports._parse_filter_dt(end, end_of_day=True) if end else None
     if start_dt is None:
-        first = conn.execute("SELECT MIN(ts) AS m FROM events;").fetchone()["m"]
-        start_dt = events.parse_ts(first) if first else now
+        # First row by id (the PK) == oldest: MIN(ts) full-scanned an
+        # unindexed column, a pointless few hundred ms at a million rows.
+        row = conn.execute("SELECT ts FROM events ORDER BY id LIMIT 1;").fetchone()
+        start_dt = events.parse_ts(row["ts"]) if row else now
     if end_dt is None:
         end_dt = now
     return start_dt, end_dt
@@ -153,10 +155,10 @@ def _queue(journeys):
 
 def _parallel(conn, now):
     """How often a work order ran in two bays at the same time."""
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     parallel_units = 0
     for wo, u in r.units.items():
-        runs = [run for run in r.runs if run.work_order == wo]
+        runs = r.runs_by_wo.get(wo, [])
         if _has_overlap(runs, now):
             parallel_units += 1
     total = len(r.units)
@@ -194,7 +196,7 @@ def _cost(delays, labor_rate):
 def open_and_recent(conn, now: Optional[datetime] = None) -> dict:
     now = now or datetime.now()
     sched = Schedule.from_settings(conn)
-    r = state.replay(conn)
+    r = state.cached_replay(conn)
     stale_delay_min = db.get_setting(conn, "stale_delay_minutes", 120)
     stale_run_min = db.get_setting(conn, "stale_run_minutes", 720)
     bay_name = {b["id"]: b["name"] for b in conn.execute("SELECT id, name FROM bays;").fetchall()}

@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
     destination     TEXT    NOT NULL,                       -- snapshot of email/phone at enqueue time
     subject         TEXT,                                   -- email only
     body            TEXT    NOT NULL,
-    status          TEXT    NOT NULL DEFAULT 'pending',     -- pending|sending|sent|failed
+    status          TEXT    NOT NULL DEFAULT 'pending',     -- pending|sending|sent|failed|expired
     attempts        INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT,
     next_attempt_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),

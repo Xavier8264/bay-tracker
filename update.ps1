@@ -73,8 +73,14 @@ function Deploy-Ref {
     # the caller can roll back. Native steps don't throw on a non-zero exit on their
     # own, so each is checked explicitly.
     param([string]$Ref)
-    git fetch --tags --quiet
-    if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)." }
+    # Only fetch when the ref isn't already local. The ROLLBACK path passes a
+    # SHA that is always local -- and the network that just broke the update
+    # must not be able to break the rollback too.
+    $local = & { $ErrorActionPreference = 'Continue'; git rev-parse --verify --quiet "$Ref^{commit}" 2>$null }
+    if (-not $local) {
+        git fetch --tags --quiet
+        if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)." }
+    }
     git checkout --quiet $Ref
     if ($LASTEXITCODE -ne 0) { throw "git checkout $Ref failed (exit $LASTEXITCODE)." }
     & $venvPy -m pip install -r (Join-Path $RepoDir "requirements.txt") --quiet
@@ -108,10 +114,27 @@ if ($serviceManaged) {
     }
 }
 
-# 1. Backup the database BEFORE anything else.
+# Refuse to update over local edits. A dirty tree means someone changed code
+# directly on this PC (against the deployment rules): `git checkout` would
+# either carry those edits along silently or refuse mid-update on an untracked
+# file -- both worse than stopping now, before anything is touched.
+$dirty = & { $ErrorActionPreference = 'Continue'; git status --porcelain 2>$null }
+if ($dirty) {
+    Write-Warning "This repo has UNCOMMITTED local changes -- updating over them is not safe:"
+    $dirty | ForEach-Object { Write-Warning "    $_" }
+    Write-Warning "NOTHING has been changed. Commit/push those edits from a dev machine, or discard them"
+    Write-Warning "(git stash), then run the update again."
+    exit 5
+}
+
+# 1. Backup the database BEFORE anything else. Exit 2 means the LOCAL backup
+# (the one this update relies on) succeeded and only the off-machine copy
+# failed -- warn but continue; anything else nonzero stops the update cold.
 Write-Host "[1] Backing up the database..."
 & $venvPy (Join-Path $RepoDir "backup_db.py")
-if ($LASTEXITCODE -ne 0) {
+if ($LASTEXITCODE -eq 2) {
+    Write-Warning "Local backup OK, but the off-machine copy failed (see above). Continuing the update; fix the backup network path in /admin."
+} elseif ($LASTEXITCODE -ne 0) {
     Write-Warning "The database backup FAILED (exit $LASTEXITCODE) -- the update stops here, BEFORE any change."
     exit 5
 }
@@ -174,6 +197,14 @@ else {
         Write-Host "[4] Installing pinned dependencies..."
         Write-Host "[5] Running migrations..."
         Deploy-Ref -Ref $Tag
+        # There is no service to health-check here, but we CAN prove the new
+        # version boots before handing it to the operator: importing app runs
+        # create_app() (schema check, config, blueprints). A version that can't
+        # even import would otherwise sit broken on disk until the next manual
+        # restart -- possibly days later, long after anyone remembers why.
+        Write-Host "[6] Boot smoke test (import app)..."
+        & $venvPy -c "import app"
+        if ($LASTEXITCODE -ne 0) { throw "The new version failed the boot smoke test (import app, exit $LASTEXITCODE) -- see the traceback above." }
     }
     catch {
         Write-Warning "Update FAILED before any restart: $($_.Exception.Message)"

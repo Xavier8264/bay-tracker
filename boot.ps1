@@ -114,8 +114,27 @@ else {
     # --- Foreground deployment: start.ps1 runs the server in THIS window ----
     $startPs1 = Join-Path $RepoDir "start.ps1"
     if (-not (Test-Path $startPs1)) { throw "start.ps1 not found in $RepoDir -- run setup.ps1 first." }
+
+    # "Safe to click any time" must actually be true. If a healthy server is
+    # already up, say so and stop (no scary port-in-use error). If something
+    # holds the port but does NOT answer /healthz (a wedged server -- exactly
+    # when the operator reaches for this button), replace it via -Force instead
+    # of telling the operator to type a PowerShell command by hand.
+    if (Test-Health -TimeoutSec 5) {
+        $url = Get-LanUrl
+        Write-Host "The server is already UP and healthy." -ForegroundColor Green
+        Write-Host "    Dashboard (TVs):  $url/dashboard" -ForegroundColor Green
+        Write-Host "    Logging console:  $url/console"   -ForegroundColor Green
+        exit 0
+    }
+    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     Write-Host "This PC is not service-managed -- launching in the foreground."
     Write-Host "Leave this window open; Ctrl+C stops the server." -ForegroundColor Yellow
     Write-Host ""
-    & $startPs1 -Port $Port
+    if ($listener) {
+        Write-Warning "Something holds port $Port but is not answering health checks -- replacing it..."
+        & $startPs1 -Port $Port -Force
+    } else {
+        & $startPs1 -Port $Port
+    }
 }

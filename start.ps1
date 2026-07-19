@@ -31,7 +31,11 @@
 #>
 param(
     [int]$Port = 5000,
-    [int]$Threads = 32,
+    # Every open dashboard/console tab holds ONE waitress thread for the life of
+    # its SSE connection; when all threads are held, every request (including
+    # /healthz) queues forever and the whole plant looks OFFLINE. Keep this
+    # comfortably above the number of screens that could ever be open at once.
+    [int]$Threads = 64,
     [string]$DataDir = "",     # empty => machine/user BAYTRACKER_DATA, else C:\BayTrackerData
     [switch]$Force,            # take the port over if another process holds it
     [switch]$Demo              # serve the demo database (separate folder, "DEMO DATA" badge)
@@ -151,5 +155,29 @@ Write-Host ""
 # Foreground, so the console shows the startup line (which states the resolved
 # data folder) and any errors. The app itself creates/repairs the database on
 # startup if anything is missing.
-& $venvPy -m waitress --listen=0.0.0.0:$Port --threads=$Threads app:app
-exit $LASTEXITCODE
+#
+# The launch runs in a relaunch loop: on an unattended floor PC a one-off crash
+# (transient I/O error, OOM) must not mean "dark kiosks until a human clicks
+# the icon". A clean exit or Ctrl+C (STATUS_CONTROL_C_EXIT) ends the loop; a
+# crash relaunches after a pause. If another process has taken the port in the
+# meantime (an update.ps1/-Force restart replaced us), we bow out instead of
+# fighting it for the port forever.
+$ctrlC = -1073741510   # STATUS_CONTROL_C_EXIT
+while ($true) {
+    & $venvPy -m waitress --listen=0.0.0.0:$Port --threads=$Threads app:app
+    $code = $LASTEXITCODE
+    if ($code -eq 0 -or $code -eq $ctrlC) { exit $code }
+
+    $newHolder = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($newHolder) {
+        Write-Warning "Port $Port is now served by another process (a restart replaced this window). Not relaunching."
+        exit 0
+    }
+
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    try {
+        Add-Content -Path (Join-Path $DataDir "server.err.log") -Value "$stamp waitress exited unexpectedly (code $code); relaunching"
+    } catch { }
+    Write-Warning "Server exited unexpectedly (code $code). Relaunching in 10 seconds... (Ctrl+C to stop for good)"
+    Start-Sleep -Seconds 10
+}
